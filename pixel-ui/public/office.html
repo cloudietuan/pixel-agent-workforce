@@ -51,6 +51,9 @@ canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;
 .ad.use_tool{background:#4fc3f7;box-shadow:0 0 4px #4fc3f7}
 .aa{font-size:8px;color:#333;letter-spacing:1.2px;text-transform:uppercase}
 .ac.on .aa{color:var(--c,#888)}
+.ac.focus{outline:1px solid var(--c,#e94560);outline-offset:-1px;
+  box-shadow:0 0 10px rgba(233,69,96,.25) inset}
+.ac{cursor:pointer}
 #feed{height:155px;border-top:1px solid #0f0f2a;display:flex;flex-direction:column;flex-shrink:0}
 #fhdr{padding:5px 10px;font-size:9px;color:#222;background:#04040c;
   letter-spacing:2px;text-transform:uppercase;border-bottom:1px solid #0a0a18}
@@ -300,6 +303,36 @@ function centerCam() {
 }
 resize();
 window.addEventListener('resize', resize);
+
+// Click handling — click an agent to trigger a "wave hello" chat bubble & log
+let focusedAgentId = null;
+canvas.addEventListener('click', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+  // Find nearest agent by screen distance
+  let best = null, bestDist = 48;
+  for (const d of DEFS) {
+    const a = agents[d.id];
+    const ax = a.wx * ZOOM - camX;
+    const ay = a.wy * ZOOM - camY - CHAR_H * ZOOM / 2;
+    const dist = Math.hypot(mx - ax, my - ay);
+    if (dist < bestDist) { best = d.id; bestDist = dist; }
+  }
+  if (best) {
+    const a = agents[best];
+    a.chatMsg = 'hey John!';
+    a.chatTimer = 2.5;
+    a.dir = DIR_DOWN; a.flip = false;
+    focusedAgentId = best;
+    addFeed(a.name, '👋 waves at you', a.color);
+    // Highlight sidebar card
+    document.querySelectorAll('.ac').forEach(el => el.classList.toggle('focus', el.id === 'card-' + best));
+  } else {
+    focusedAgentId = null;
+    document.querySelectorAll('.ac').forEach(el => el.classList.remove('focus'));
+  }
+});
 
 // ── Assets ──────────────────────────────────────────────────────────────────
 const imgs = {};
@@ -719,6 +752,15 @@ function buildSidebar() {
         `<div class="at" id="th-${d.id}">idle</div>` +
         `<div class="as"><span class="ad" id="dt-${d.id}"></span>` +
         `<span class="aa" id="ac-${d.id}">idle</span></div>`;
+      card.addEventListener('click', () => {
+        const a = agents[d.id];
+        a.chatMsg = 'on it, John!';
+        a.chatTimer = 2.5;
+        a.tx = a.deskX; a.ty = a.deskY;
+        focusedAgentId = d.id;
+        addFeed(a.name, '📣 pinged by you', a.color);
+        document.querySelectorAll('.ac').forEach(el => el.classList.toggle('focus', el.id === 'card-' + d.id));
+      });
       list.appendChild(card);
     });
   });

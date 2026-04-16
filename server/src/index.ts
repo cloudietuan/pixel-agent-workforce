@@ -51,8 +51,11 @@ const colyseusServer = new Server({
 // Define Rooms
 colyseusServer.define('office', OfficeRoom);
 
-// Start listening
+// Node http.Server listens on 0.0.0.0 by default — devices on the same LAN
+// can reach this server at ws://<your-ip>:3000.
 const PORT = Number(process.env.PORT || 3000);
+const backend = process.env.ANTHROPIC_API_KEY ? 'Claude (Anthropic)' : 'Ollama (local)';
 colyseusServer.listen(PORT).then(() => {
-    console.log(`[Server] AgentOffice Engine listening on ws://localhost:${PORT}`);
+    console.log(`[Server] AgentOffice Engine listening on ws://0.0.0.0:${PORT}`);
+    console.log(`[Server] Inference backend: ${backend}`);
 });

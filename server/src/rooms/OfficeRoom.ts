@@ -1,7 +1,7 @@
 import { Room, Client } from 'colyseus';
 import { OfficeState } from '../schema/OfficeState';
 import { Agent, Office, OfficeConfig, ConversationMessage } from '../../core';
-import { OllamaAdapter } from '../../adapters';
+import { OllamaAdapter, ClaudeAdapter } from '../../adapters';
 import { ToolExecutor } from '../tools/ToolExecutor';
 import { MemoryStore } from '../memory/MemoryStore';
 import { JOHNS_AGENTS } from '../johns-agents';
@@ -32,7 +32,16 @@ export class OfficeRoom extends Room<OfficeState> {
     private demoTickCount = 0;
     private coreAgents: Map<string, Agent> = new Map();
     private thinkingLocks: Map<string, boolean> = new Map();
-    private ollamaAdapter = new OllamaAdapter('http://127.0.0.1:11434');
+    // Inference backend — prefers Claude if ANTHROPIC_API_KEY is set, else Ollama.
+    // Override model via ANTHROPIC_MODEL / OLLAMA_MODEL env vars.
+    private inferenceAdapter = process.env.ANTHROPIC_API_KEY
+        ? new ClaudeAdapter(process.env.ANTHROPIC_API_KEY)
+        : new OllamaAdapter('http://127.0.0.1:11434');
+    private inferenceModel = process.env.ANTHROPIC_API_KEY
+        ? (process.env.ANTHROPIC_MODEL || 'claude-haiku-4-5-20251001')
+        : (process.env.OLLAMA_MODEL || 'llama3.2:latest');
+    // Back-compat alias so any external reference still works
+    private ollamaAdapter = this.inferenceAdapter;
     private hireCount = 0; // Counter for generating unique IDs
     private toolExecutor = new ToolExecutor();
     private memoryStore = new MemoryStore();
@@ -92,8 +101,8 @@ export class OfficeRoom extends Room<OfficeState> {
             const coreAgent = new Agent({
                 id, name, role, avatar: 'sprite.png',
                 inference: {
-                    provider: 'ollama',
-                    model: 'llama3.2:latest',
+                    provider: this.inferenceAdapter.provider,
+                    model: this.inferenceModel,
                     systemPrompt: `You are ${name}, a ${role} in a virtual office. Be social, do your work, and collaborate with colleagues. Keep thoughts SHORT.`,
                 },
                 personality: {
@@ -112,7 +121,7 @@ export class OfficeRoom extends Room<OfficeState> {
                 memory: { shortTermLimit: 50 }
             });
 
-            coreAgent.setInferenceAdapter(this.ollamaAdapter);
+            coreAgent.setInferenceAdapter(this.inferenceAdapter);
             await coreAgent.initialize();
 
             // Load persistent memories from previous sessions
@@ -346,8 +355,8 @@ export class OfficeRoom extends Room<OfficeState> {
                                 const hireAgent = new Agent({
                                     id: hireId, name: hireName, role: hireRole, avatar: 'sprite.png',
                                     inference: {
-                                        provider: 'ollama',
-                                        model: 'llama3.2:latest',
+                                        provider: this.inferenceAdapter.provider,
+                                        model: this.inferenceModel,
                                         systemPrompt: `You are ${hireName}, a ${hireRole} who just joined the team at a virtual office. You were hired by ${coreAgent.config.name}. Be enthusiastic, helpful, and eager to learn. Introduce yourself to your colleagues. Keep thoughts SHORT.`,
                                     },
                                     personality: {
@@ -365,7 +374,7 @@ export class OfficeRoom extends Room<OfficeState> {
                                     memory: { shortTermLimit: 50 }
                                 });
 
-                                hireAgent.setInferenceAdapter(this.ollamaAdapter);
+                                hireAgent.setInferenceAdapter(this.inferenceAdapter);
                                 await hireAgent.initialize();
                                 this.coreAgents.set(hireId, hireAgent);
                                 this.thinkingLocks.set(hireId, false);
