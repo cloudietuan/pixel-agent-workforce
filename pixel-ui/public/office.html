@@ -22,24 +22,35 @@ canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;
 #cdot{width:7px;height:7px;border-radius:50%;background:#1a1a1a;transition:all .4s;flex-shrink:0}
 #cdot.on{background:#00ff88;box-shadow:0 0 8px #00ff88}
 #ctxt{font-size:10px;color:#333;letter-spacing:1px}
-#alist{flex:1;overflow-y:auto;padding:5px;scrollbar-width:thin;scrollbar-color:#1a0a3a transparent}
+#alist{flex:1;overflow-y:auto;padding:6px 5px 8px;scrollbar-width:thin;scrollbar-color:#1a0a3a transparent}
 #alist::-webkit-scrollbar{width:3px}
 #alist::-webkit-scrollbar-thumb{background:#1a0a3a}
+.grp{font-size:8px;color:#666;letter-spacing:2.5px;padding:8px 7px 4px;text-transform:uppercase;
+  border-bottom:1px solid #13132a;margin:4px 2px 4px;display:flex;align-items:center;gap:6px}
+.grp:first-child{margin-top:0}
+.grp::before{content:'';width:4px;height:4px;background:var(--c,#e94560);flex-shrink:0;
+  box-shadow:0 0 6px var(--c,#e94560)}
+.grp-c{color:#444;font-size:8px;margin-left:auto;letter-spacing:1px}
 .ac{background:#06060f;border:1px solid #0f0f2a;border-radius:3px;
-  margin-bottom:4px;padding:7px 9px;position:relative;overflow:hidden;transition:border-color .15s}
+  margin:0 2px 4px;padding:7px 9px 7px 12px;position:relative;overflow:hidden;
+  transition:border-color .15s,background .15s}
 .ac::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;
-  background:var(--c,#444);transition:opacity .2s;opacity:.4}
-.ac.on{border-color:var(--c,#444)}
+  background:var(--c,#444);transition:opacity .2s;opacity:.35}
+.ac.on{border-color:var(--c,#444);background:#0a0a18}
 .ac.on::before{opacity:1}
-.an{font-size:10px;font-weight:bold;color:var(--c,#aaa);letter-spacing:.5px}
-.at{font-size:9px;color:#3a3a5a;margin-top:2px;line-height:1.35;
-  max-height:26px;overflow:hidden}
-.as{display:flex;align-items:center;gap:4px;margin-top:3px}
+.an{font-size:10px;font-weight:bold;color:var(--c,#aaa);letter-spacing:.5px;
+  display:flex;align-items:center;gap:5px}
+.an-e{font-size:11px}
+.at{font-size:9px;color:#4a4a6a;margin-top:3px;line-height:1.4;
+  max-height:26px;overflow:hidden;font-style:italic}
+.ac.on .at{color:#7a7a9a}
+.as{display:flex;align-items:center;gap:5px;margin-top:4px}
 .ad{width:5px;height:5px;border-radius:50%;background:#111;flex-shrink:0;transition:all .3s}
 .ad.work{background:#ffcc00;box-shadow:0 0 4px #ffcc00}
 .ad.talk{background:#00ff88;box-shadow:0 0 4px #00ff88}
 .ad.use_tool{background:#4fc3f7;box-shadow:0 0 4px #4fc3f7}
-.aa{font-size:8px;color:#222;letter-spacing:1px;text-transform:uppercase}
+.aa{font-size:8px;color:#333;letter-spacing:1.2px;text-transform:uppercase}
+.ac.on .aa{color:var(--c,#888)}
 #feed{height:155px;border-top:1px solid #0f0f2a;display:flex;flex-direction:column;flex-shrink:0}
 #fhdr{padding:5px 10px;font-size:9px;color:#222;background:#04040c;
   letter-spacing:2px;text-transform:uppercase;border-bottom:1px solid #0a0a18}
@@ -88,20 +99,26 @@ const DIR_RIGHT = 2;
 const COLS = 24, ROWS = 20;
 const WS = 'ws://localhost:3000';
 
-// 12 agents — col/row is their desk tile
+// 12 agents — 4×3 grid, evenly spaced
+// Cols 4/9/14/19 — 5-tile spacing, desks (3 wide) don't touch walls
+// Rows 3/9/15 — 6-tile spacing: row N agent standing, N+1/N+2 desk, N+3..N+5 walkway
+// si = sprite sheet index (char_0..char_5) — grouped so row-mates have different skins
 const DEFS = [
-  {id:'scholar',  name:'Scholar',  emoji:'🎓',color:'#4fc3f7',col:2, row:3, si:0},
-  {id:'biz',      name:'Biz',      emoji:'💼',color:'#81c784',col:7, row:3, si:1},
-  {id:'research', name:'Research', emoji:'🔬',color:'#ffb74d',col:12,row:3, si:2},
-  {id:'atlas',    name:'Atlas',    emoji:'📅',color:'#ce93d8',col:17,row:3, si:3},
-  {id:'finance',  name:'Finance',  emoji:'💰',color:'#f48fb1',col:22,row:3, si:4},
-  {id:'exercise', name:'Exercise', emoji:'💪',color:'#80cbc4',col:2, row:10,si:5},
-  {id:'social',   name:'Social',   emoji:'📣',color:'#fff176',col:7, row:10,si:0},
-  {id:'nutrition',name:'Nutrition',emoji:'🍽',color:'#a5d6a7',col:12,row:10,si:1},
-  {id:'mental',   name:'Mental',   emoji:'🧠',color:'#ef9a9a',col:17,row:10,si:2},
-  {id:'comms',    name:'Comms',    emoji:'✉️',color:'#90caf9',col:22,row:10,si:3},
-  {id:'knowledge',name:'Knowledge',emoji:'📚',color:'#ffe082',col:7, row:17,si:4},
-  {id:'it',       name:'IT',       emoji:'💻',color:'#b0bec5',col:12,row:17,si:5},
+  // Row 1 — Strategic / leadership
+  {id:'atlas',    name:'Atlas',    emoji:'📅',color:'#ce93d8',col:4, row:3, si:3, group:'Strategy'},
+  {id:'scholar',  name:'Scholar',  emoji:'🎓',color:'#4fc3f7',col:9, row:3, si:0, group:'Strategy'},
+  {id:'research', name:'Research', emoji:'🔬',color:'#ffb74d',col:14,row:3, si:2, group:'Strategy'},
+  {id:'knowledge',name:'Knowledge',emoji:'📚',color:'#ffe082',col:19,row:3, si:4, group:'Strategy'},
+  // Row 2 — Business operations
+  {id:'biz',      name:'Biz',      emoji:'💼',color:'#81c784',col:4, row:9, si:1, group:'Business'},
+  {id:'finance',  name:'Finance',  emoji:'💰',color:'#f48fb1',col:9, row:9, si:4, group:'Business'},
+  {id:'comms',    name:'Comms',    emoji:'✉',color:'#90caf9',col:14,row:9, si:3, group:'Business'},
+  {id:'social',   name:'Social',   emoji:'📣',color:'#fff176',col:19,row:9, si:0, group:'Business'},
+  // Row 3 — Wellness / systems
+  {id:'exercise', name:'Exercise', emoji:'💪',color:'#80cbc4',col:4, row:15,si:5, group:'Wellness'},
+  {id:'nutrition',name:'Nutrition',emoji:'🍽',color:'#a5d6a7',col:9, row:15,si:1, group:'Wellness'},
+  {id:'mental',   name:'Mental',   emoji:'🧠',color:'#ef9a9a',col:14,row:15,si:2, group:'Wellness'},
+  {id:'it',       name:'IT',       emoji:'💻',color:'#b0bec5',col:19,row:15,si:5, group:'Wellness'},
 ];
 
 // Agent runtime state
@@ -116,17 +133,138 @@ DEFS.forEach(d => {
     // World pixel positions
     wx, wy,        // current (world)
     tx: wx, ty: wy, // target (world)
+    deskX: wx, deskY: wy, // home desk position (to return to)
     action: 'idle', thought: '...', busy: false,
     // Animation
     frame: 0, frameTimer: 0,
     dir: DIR_DOWN,
     flip: false,
-    // Walk timing
-    walkTimer: 0,
+    // Wander behavior (Pokemon-style NPC wandering)
+    wanderTimer: 1 + Math.random() * 3, // first wander after 1-4s
+    wanderCount: 0,
+    wanderLimit: 3 + Math.floor(Math.random() * 4), // 3-6 moves before rest
+    pausedAt: 0, // time still standing
+    purpose: null, // 'visit' | 'break' | 'roam' | 'rest' | null
+    visiting: null, // buddy id if visiting
+    chatMsg: null, // ephemeral message
+    chatTimer: 0,
     // Idle bob
     bobPhase: Math.random() * Math.PI * 2,
   };
 });
+
+// Walkable tile set — all tiles except walls and furniture
+// Furniture blocked tiles — precomputed once
+const BLOCKED = new Set();
+function blockTile(c, r) { BLOCKED.add(c + ',' + r); }
+// Walls
+for (let c = 0; c < COLS; c++) { blockTile(c, 0); blockTile(c, ROWS-1); }
+for (let r = 0; r < ROWS; r++) { blockTile(0, r); blockTile(COLS-1, r); }
+// Desks (3×2) + PCs for each agent
+DEFS.forEach(d => {
+  for (let dc = -1; dc <= 1; dc++) {
+    blockTile(d.col + dc, d.row + 1);
+    blockTile(d.col + dc, d.row + 2);
+  }
+});
+// Sofas and ctable
+[[9,12],[10,12],[13,12],[14,12],[11,13],[12,13]].forEach(([c,r]) => blockTile(c,r));
+// Bookshelves and coffee and bins
+[[1,6],[1,7],[1,12],[1,17],[22,6],[22,7],[22,12],[22,17],[2,18],[21,18]].forEach(([c,r]) => blockTile(c,r));
+// Wboard
+blockTile(1, 1);
+
+function isWalkable(col, row) {
+  if (col < 1 || row < 1 || col >= COLS-1 || row >= ROWS-1) return false;
+  return !BLOCKED.has(col + ',' + row);
+}
+
+// Relationship map — who visits whom (from context-bible.md inter-agent rules)
+const BUDDIES = {
+  atlas:     ['scholar','biz','finance','mental','exercise','social','comms'], // orchestrator
+  mental:    ['atlas','scholar','exercise','nutrition'], // circuit breaker
+  it:        ['knowledge','social','biz','research'], // weekly audits
+  exercise:  ['nutrition','mental'],
+  nutrition: ['exercise','scholar'],
+  biz:       ['finance','social','comms'],
+  finance:   ['biz','research','atlas'],
+  research:  ['scholar','finance','knowledge'],
+  scholar:   ['atlas','knowledge','research'],
+  social:    ['comms','biz','it'],
+  comms:     ['social','biz','atlas'],
+  knowledge: ['research','scholar','it'],
+};
+
+// Break area — middle sofa zone (agents gather here for "coffee")
+const BREAK_SPOTS = [
+  {col: 8, row: 13}, {col: 11, row: 14}, {col: 12, row: 14}, {col: 15, row: 13},
+];
+
+// Find a walkable tile adjacent to a target tile (for "visiting" someone's desk)
+function adjacentWalkable(col, row) {
+  const candidates = [[col-2,row],[col+2,row],[col,row-1],[col-1,row-1],[col+1,row-1]];
+  for (const [c, r] of candidates) if (isWalkable(c, r)) return { col: c, row: r };
+  return null;
+}
+
+// Pick a wander target with purpose:
+//   30% visit a buddy agent's desk area
+//   20% take a break (sofa / coffee)
+//   50% roam near own desk
+function pickWanderTarget(agent) {
+  const roll = Math.random();
+
+  if (roll < 0.30) {
+    // Visit a buddy
+    const buddies = BUDDIES[agent.id] || [];
+    if (buddies.length) {
+      const targetId = buddies[Math.floor(Math.random() * buddies.length)];
+      const target = agents[targetId];
+      if (target) {
+        const spot = adjacentWalkable(target.col, target.row);
+        if (spot) {
+          return {
+            tx: spot.col * TILE + TILE / 2,
+            ty: spot.row * TILE + TILE,
+            purpose: 'visit', visiting: targetId,
+          };
+        }
+      }
+    }
+  } else if (roll < 0.50) {
+    // Break area
+    const spot = BREAK_SPOTS[Math.floor(Math.random() * BREAK_SPOTS.length)];
+    if (isWalkable(spot.col, spot.row)) {
+      return {
+        tx: spot.col * TILE + TILE / 2,
+        ty: spot.row * TILE + TILE,
+        purpose: 'break',
+      };
+    }
+  }
+
+  // Roam near own desk (default)
+  for (let tries = 0; tries < 20; tries++) {
+    const dc = Math.floor(Math.random() * 5) - 2;
+    const dr = Math.floor(Math.random() * 5) - 2;
+    const col = agent.col + dc;
+    const row = agent.row + dr;
+    if (isWalkable(col, row)) {
+      return {
+        tx: col * TILE + TILE / 2,
+        ty: row * TILE + TILE,
+        purpose: 'roam',
+      };
+    }
+  }
+  return { tx: agent.deskX, ty: agent.deskY, purpose: 'rest' };
+}
+
+// Simulate office conversation when two agents meet
+const CHATTER = [
+  'got a sec?','how\'s it going?','status update?','quick sync',
+  'checking in','got a minute?','stand-up?','syncing up','got updates',
+];
 
 // ── Canvas ──────────────────────────────────────────────────────────────────
 const canvas = document.getElementById('c');
@@ -225,6 +363,18 @@ function sprTile(key, col, row) {
 }
 
 // ── Floor ──────────────────────────────────────────────────────────────────
+// Zone rugs — Pokémon-style team floor tinting (col range, row range, tint rgba)
+const ZONES = [
+  // Strategy (row 1 agents) — cool blue wash
+  {c0:3, c1:20, r0:2, r1:5, tint:'rgba(79,195,247,0.08)', border:'rgba(79,195,247,0.35)'},
+  // Business (row 2 agents) — warm green wash
+  {c0:3, c1:20, r0:8, r1:11, tint:'rgba(129,199,132,0.08)', border:'rgba(129,199,132,0.35)'},
+  // Break zone — amber wash
+  {c0:8, c1:15, r0:12, r1:14, tint:'rgba(255,204,0,0.07)', border:'rgba(255,204,0,0.3)'},
+  // Wellness (row 3 agents) — soft red wash
+  {c0:3, c1:20, r0:14, r1:17, tint:'rgba(239,154,154,0.08)', border:'rgba(239,154,154,0.35)'},
+];
+
 function drawFloor() {
   const keys = ['f0','f1','f2','f3'];
   for (let r = 1; r < ROWS-1; r++) {
@@ -236,6 +386,26 @@ function drawFloor() {
       if (img && img.complete) ctx.drawImage(img, 0,0,16,16, x,y,S,S);
     }
   }
+  // Zone rugs — semi-transparent team-color overlays with dashed border
+  ZONES.forEach(z => {
+    const x = z.c0*S - camX, y = z.r0*S - camY;
+    const w = (z.c1 - z.c0 + 1)*S, h = (z.r1 - z.r0 + 1)*S;
+    ctx.fillStyle = z.tint;
+    ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = z.border;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([S/6, S/4]);
+    ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
+    ctx.setLineDash([]);
+  });
+  // Entrance doormat (bottom-center)
+  const doorC = Math.floor(COLS/2) - 1;
+  const doorX = doorC*S - camX, doorY = (ROWS-2)*S - camY;
+  ctx.fillStyle = 'rgba(233,69,96,0.15)';
+  ctx.fillRect(doorX, doorY, S*2, S);
+  ctx.strokeStyle = 'rgba(233,69,96,0.5)';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(doorX + 2, doorY + 2, S*2 - 4, S - 4);
 }
 
 // ── Walls ──────────────────────────────────────────────────────────────────
@@ -279,16 +449,35 @@ function drawFurniture(pcTick) {
     }
   });
 
-  // Shared office items [key, col, row]
+  // Shared office items [key, col, row] — no overlap, grouped by zone
   [
-    ['wboard',  0,  1], ['clock',   11, 0],
-    ['painting',4,  0], ['painting2',8, 0], ['painting2',16, 0],
-    ['book',    0,  5], ['book',    0,  6], ['dbook',   0,  7],
-    ['plant',   1,  1], ['plant',   22, 1], ['lplant',  22,18],
-    ['cactus',  5,  1], ['cactus',  19, 1], ['hplant',  14, 1],
-    ['sofa_f',  8, 14], ['sofa_s', 10, 14], ['ctable',  9, 15],
-    ['wchair',  6, 14], ['wchair',  8, 14],
-    ['coffee', 22,  7], ['bin',    22, 13], ['bin',     1, 13],
+    // Wall decor (row 0 = top wall strip)
+    ['clock',    11, 0], ['clock',     12, 0],
+    ['painting',  2, 0], ['painting2',  7, 0],
+    ['painting', 15, 0], ['painting2', 20, 0],
+    ['hplant',    6, 0], ['hplant',    17, 0],
+
+    // Left-wall storage column (col 1, between walls and first desk column)
+    ['wboard',  1,  1],
+    ['book',    1,  6], ['dbook',    1,  7],
+    ['book',    1, 12],
+    ['lplant',  1, 17],
+
+    // Right-wall storage column (col 22)
+    ['dbook',  22,  6], ['book',    22,  7],
+    ['coffee', 22, 12],
+    ['lplant', 22, 17],
+
+    // Walkway decor between row 1 and row 2 of agents (rows 6-7 area)
+    ['plant',   2, 7],  ['plant',  21, 7],
+    ['cactus', 11, 7],  ['cactus', 12, 7],
+
+    // Break area in the middle walkway (rows 12-13)
+    ['sofa_f',  9, 12], ['sofa_f', 10, 12], ['sofa_f', 13, 12], ['sofa_f', 14, 12],
+    ['ctable', 11, 13],
+
+    // Bins in bottom corners (floor row 18, just above bottom wall)
+    ['bin',     2, 18], ['bin',    21, 18],
   ].forEach(([k,c,r]) => sprTile(k, c, r));
 }
 
@@ -331,11 +520,71 @@ function drawAgents(ts) {
       // Walk animation: 4 frames
       a.frameTimer += dt;
       if (a.frameTimer > 0.15) { a.frameTimer = 0; a.frame = (a.frame + 1) % 4; }
+      a.pausedAt = 0;
     } else {
       // Idle: frame 1 (standing still)
       a.frame = 1;
       a.frameTimer = 0;
-      // Gentle idle bob using world Y offset
+      a.pausedAt += dt;
+
+      // Face toward desk when arrived home
+      if (!a.busy && Math.abs(a.wx - a.deskX) < 1 && Math.abs(a.wy - a.deskY) < 1) {
+        a.dir = DIR_DOWN;
+        a.flip = false;
+      }
+
+      // Tick chat bubble timer
+      if (a.chatTimer > 0) {
+        a.chatTimer -= dt;
+        if (a.chatTimer <= 0) a.chatMsg = null;
+      }
+
+      // ── Wander behavior (Pokémon-style idle NPC, with purpose) ───────
+      if (!a.busy) {
+        // On arrival at wander target — trigger "interaction" event
+        if (a.purpose === 'visit' && a.visiting) {
+          const buddy = agents[a.visiting];
+          if (buddy) {
+            // Show a chat bubble between them
+            a.chatMsg = CHATTER[Math.floor(Math.random() * CHATTER.length)];
+            a.chatTimer = 2.2;
+            // Turn toward buddy
+            const bdx = buddy.wx - a.wx;
+            if (Math.abs(bdx) > 1) { a.dir = DIR_RIGHT; a.flip = bdx < 0; }
+            else a.dir = buddy.wy > a.wy ? DIR_DOWN : DIR_UP;
+            // Buddy acknowledges (if also idle)
+            if (!buddy.busy && !buddy.chatMsg) {
+              buddy.chatMsg = 'noted';
+              buddy.chatTimer = 1.8;
+              const bdx2 = a.wx - buddy.wx;
+              if (Math.abs(bdx2) > 1) { buddy.dir = DIR_RIGHT; buddy.flip = bdx2 < 0; }
+              else buddy.dir = a.wy > buddy.wy ? DIR_DOWN : DIR_UP;
+            }
+            addFeed(d.name, '→ ' + buddy.name + ': ' + a.chatMsg, d.color);
+          }
+          a.purpose = null;
+          a.visiting = null;
+        }
+
+        a.wanderTimer -= dt;
+        if (a.wanderTimer <= 0) {
+          if (a.wanderCount >= a.wanderLimit) {
+            // Rest cycle — return to desk
+            a.tx = a.deskX; a.ty = a.deskY;
+            a.purpose = 'rest';
+            a.wanderCount = 0;
+            a.wanderLimit = 3 + Math.floor(Math.random() * 4);
+            a.wanderTimer = 4 + Math.random() * 5; // rest at desk 4-9s
+          } else {
+            const t = pickWanderTarget(a);
+            a.tx = t.tx; a.ty = t.ty;
+            a.purpose = t.purpose;
+            a.visiting = t.visiting || null;
+            a.wanderCount++;
+            a.wanderTimer = 2 + Math.random() * 2.5;
+          }
+        }
+      }
     }
 
     // ── Screen position (bottom-center anchor, matching pixel-agents) ─────
@@ -394,9 +643,13 @@ function drawAgents(ts) {
         sx, sy - charH - 18 + bob);
     }
 
-    // ── Thought bubble ────────────────────────────────────────────────────
-    if (a.busy && a.thought && a.thought !== '...') {
-      const txt = a.thought.length > 30 ? a.thought.slice(0,27)+'…' : a.thought;
+    // ── Thought / chat bubble ─────────────────────────────────────────────
+    let bubbleTxt = null;
+    if (a.chatMsg) bubbleTxt = a.chatMsg;
+    else if (a.busy && a.thought && a.thought !== '...') bubbleTxt = a.thought;
+
+    if (bubbleTxt) {
+      const txt = bubbleTxt.length > 30 ? bubbleTxt.slice(0,27)+'…' : bubbleTxt;
       ctx.font = '9px "Courier New",monospace';
       ctx.textAlign = 'center';
       const bw = Math.min(ctx.measureText(txt).width + 10, 170);
@@ -409,6 +662,14 @@ function drawAgents(ts) {
       ctx.fill(); ctx.stroke();
       ctx.fillStyle = d.color + 'dd';
       ctx.fillText(txt, sx, by + 11);
+      // Tail pointing to character head
+      ctx.fillStyle = 'rgba(8,8,24,.92)';
+      ctx.beginPath();
+      ctx.moveTo(sx - 3, by + 14);
+      ctx.lineTo(sx + 3, by + 14);
+      ctx.lineTo(sx, by + 18);
+      ctx.closePath();
+      ctx.fill();
     }
   });
 }
@@ -417,17 +678,36 @@ function drawAgents(ts) {
 function buildSidebar() {
   const list = document.getElementById('alist');
   if (list.children.length) return;
+
+  // Group agents by their `group` field, preserving DEFS order
+  const byGroup = [];
   DEFS.forEach(d => {
-    const card = document.createElement('div');
-    card.className = 'ac';
-    card.id = 'card-' + d.id;
-    card.style.setProperty('--c', d.color);
-    card.innerHTML =
-      `<div class="an">${d.emoji} ${d.name}</div>` +
-      `<div class="at" id="th-${d.id}">...</div>` +
-      `<div class="as"><span class="ad" id="dt-${d.id}"></span>` +
-      `<span class="aa" id="ac-${d.id}">idle</span></div>`;
-    list.appendChild(card);
+    let bucket = byGroup.find(g => g.name === d.group);
+    if (!bucket) { bucket = {name: d.group, items: []}; byGroup.push(bucket); }
+    bucket.items.push(d);
+  });
+
+  const groupColors = {Strategy:'#4fc3f7', Business:'#81c784', Wellness:'#ef9a9a'};
+
+  byGroup.forEach(g => {
+    const hdr = document.createElement('div');
+    hdr.className = 'grp';
+    hdr.style.setProperty('--c', groupColors[g.name] || '#e94560');
+    hdr.innerHTML = `<span>${g.name}</span><span class="grp-c">${g.items.length}</span>`;
+    list.appendChild(hdr);
+
+    g.items.forEach(d => {
+      const card = document.createElement('div');
+      card.className = 'ac';
+      card.id = 'card-' + d.id;
+      card.style.setProperty('--c', d.color);
+      card.innerHTML =
+        `<div class="an"><span class="an-e">${d.emoji}</span><span>${d.name}</span></div>` +
+        `<div class="at" id="th-${d.id}">idle</div>` +
+        `<div class="as"><span class="ad" id="dt-${d.id}"></span>` +
+        `<span class="aa" id="ac-${d.id}">idle</span></div>`;
+      list.appendChild(card);
+    });
   });
 }
 

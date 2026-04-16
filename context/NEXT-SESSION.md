@@ -16,23 +16,26 @@ Open: http://localhost:5174/office.html
 
 ---
 
-## THE ONE THING TO FINISH: office.html
+## UI REWRITE — DONE ✅ (April 16 evening)
+File: pixel-ui/public/office.html (branch: claude/update-pixel-agent-ui-qHlY5)
 
-File: ~/johns-command-center/pixel-ui/public/office.html
-The character drawing code is correct and written. Just needs:
-1. Sidebar build + update functions
-2. Colyseus server connection
-3. Main render loop + boot
+Completed:
+- 4×3 agent grid (no wall/desk overlap)
+- Purposeful wander behavior (visit buddies, break area, rest)
+- Chat bubbles + live-feed logging when agents meet
+- Pokémon-style zone rugs per team (Strategy/Business/Wellness)
+- Grouped sidebar cards with color-coded team headers
+- Walk/idle sprite animation, bottom-center anchor, 4-frame walk
+- Depth sorting (Y-sort) so characters render in front of rear furniture
 
-Key facts already figured out:
-- CHAR_FRAME_W=16, CHAR_FRAME_H=32 (NOT 16x16, it's 16x32)
-- Direction rows: 0=down, 1=up, 2=right, left=flip right
-- Anchor characters BOTTOM-CENTER: drawX = x - width/2, drawY = y - height
-- Walk frames 0-3, Idle frame 1
-- ZOOM=3 (48px tiles), TILE=16
-
-Just tell Claude: "Continue finishing office.html from where we left off"
-and share this file as context.
+## STILL OPEN (next session)
+1. Wire Claude API (Anthropic) as an alternative inference backend
+   — current stack uses Ollama llama3.2 locally
+   — agents each get a Claude model call with their persona + context
+   — requires ANTHROPIC_API_KEY env var + server/src/rooms/OfficeRoom.ts edits
+2. Overlay mode — make pixel-ui a floating overlay window (Electron wrapper?)
+3. Sound: footsteps, door chime on entrance visits
+4. start.sh — node version auto-switch still flaky
 
 ---
 
