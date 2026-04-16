@@ -38,6 +38,19 @@ npx vite --port 5174
 
 Open **http://localhost:5174/office.html**
 
+### Access from other devices on your network
+
+Start Vite bound to all interfaces:
+
+```bash
+cd pixel-ui && npx vite --host 0.0.0.0 --port 5174
+```
+
+Then on any phone / laptop on the same Wi-Fi, open
+`http://<your-mac-ip>:5174/office.html` (the WebSocket auto-detects the host).
+
+To target a different server, append `?ws=ws://host:port` to the URL.
+
 ---
 
 ## The 12 Agents

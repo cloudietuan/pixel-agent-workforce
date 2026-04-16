@@ -97,7 +97,20 @@ const DIR_RIGHT = 2;
 // Left = flip of right row
 
 const COLS = 24, ROWS = 20;
-const WS = 'ws://localhost:3000';
+
+// WebSocket URL — auto-detects host so the office can be opened from any
+// device on your LAN (phone, other laptop) when you access it via
+// http://<your-mac-ip>:5174/office.html. Override with ?ws=ws://host:port
+function resolveWsUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const override = params.get('ws');
+  if (override) return override;
+  // Default: same host as the page, port 3000 (Colyseus server)
+  const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
+  const host = window.location.hostname || 'localhost';
+  return `${scheme}://${host}:3000`;
+}
+const WS = resolveWsUrl();
 
 // 12 agents — 4×3 grid, evenly spaced
 // Cols 4/9/14/19 — 5-tile spacing, desks (3 wide) don't touch walls
