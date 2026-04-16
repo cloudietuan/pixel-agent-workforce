@@ -1,0 +1,17 @@
+#!/bin/bash
+# ═══════════════════════════════════════════════════════
+# CONTEXT SYNC — Drop conversations here to update agents
+# ═══════════════════════════════════════════════════════
+# HOW TO USE:
+#   1. In Claude.ai, copy key parts of a conversation
+#   2. Save as a .txt or .md file in this folder
+#   3. The server auto-detects it and updates agent memories
+#
+# The server watches this folder — any new file triggers an update.
+# Agents most relevant to the content will receive the memory.
+#
+# EXAMPLE FILES TO DROP HERE:
+#   - lumina-client-update.txt  → Biz, Finance, Comms agents update
+#   - ap-stats-notes.txt        → Scholar, Atlas agents update
+#   - volleyball-schedule.txt   → Exercise, Atlas, Mental agents update
+#   - stock-research.txt        → Research, Finance agents update

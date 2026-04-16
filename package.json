@@ -1,0 +1,5 @@
+{
+  "name": "johns-command-center-root",
+  "private": true,
+  "description": "Root boundary — prevents npm workspace hoisting from agent-office"
+}

@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Johns Command Center</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#0d0d1a}
+#app{display:flex;width:100vw;height:100vh}
+#cv-col{flex:1;position:relative;overflow:hidden;background:#0d0d1a}
+canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;
+  position:absolute;top:0;left:0;width:100%;height:100%}
+#sidebar{width:272px;min-width:272px;display:flex;flex-direction:column;
+  background:#070712;border-left:2px solid #1a0a2e;overflow:hidden;
+  font-family:'Courier New',monospace}
+#hdr{padding:12px 14px 10px;background:linear-gradient(135deg,#0d0020,#1a0035);
+  border-bottom:2px solid #e94560}
+#hdr-title{font-size:9px;color:#e94560;letter-spacing:3px;font-weight:bold;
+  text-transform:uppercase;text-shadow:0 0 12px #e94560}
+#hdr-sub{font-size:10px;color:#3a3a5a;margin-top:3px;letter-spacing:1px}
+#conn-row{display:flex;align-items:center;gap:6px;margin-top:7px}
+#cdot{width:7px;height:7px;border-radius:50%;background:#1a1a1a;transition:all .4s;flex-shrink:0}
+#cdot.on{background:#00ff88;box-shadow:0 0 8px #00ff88}
+#ctxt{font-size:10px;color:#333;letter-spacing:1px}
+#alist{flex:1;overflow-y:auto;padding:5px;scrollbar-width:thin;scrollbar-color:#1a0a3a transparent}
+#alist::-webkit-scrollbar{width:3px}
+#alist::-webkit-scrollbar-thumb{background:#1a0a3a}
+.ac{background:#06060f;border:1px solid #0f0f2a;border-radius:3px;
+  margin-bottom:4px;padding:7px 9px;position:relative;overflow:hidden;transition:border-color .15s}
+.ac::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;
+  background:var(--c,#444);transition:opacity .2s;opacity:.4}
+.ac.on{border-color:var(--c,#444)}
+.ac.on::before{opacity:1}
+.an{font-size:10px;font-weight:bold;color:var(--c,#aaa);letter-spacing:.5px}
+.at{font-size:9px;color:#3a3a5a;margin-top:2px;line-height:1.35;
+  max-height:26px;overflow:hidden}
+.as{display:flex;align-items:center;gap:4px;margin-top:3px}
+.ad{width:5px;height:5px;border-radius:50%;background:#111;flex-shrink:0;transition:all .3s}
+.ad.work{background:#ffcc00;box-shadow:0 0 4px #ffcc00}
+.ad.talk{background:#00ff88;box-shadow:0 0 4px #00ff88}
+.ad.use_tool{background:#4fc3f7;box-shadow:0 0 4px #4fc3f7}
+.aa{font-size:8px;color:#222;letter-spacing:1px;text-transform:uppercase}
+#feed{height:155px;border-top:1px solid #0f0f2a;display:flex;flex-direction:column;flex-shrink:0}
+#fhdr{padding:5px 10px;font-size:9px;color:#222;background:#04040c;
+  letter-spacing:2px;text-transform:uppercase;border-bottom:1px solid #0a0a18}
+#flog{flex:1;overflow-y:auto;padding:5px 9px;font-size:10px;line-height:1.65;
+  scrollbar-width:thin;scrollbar-color:#0f0a2a transparent}
+#flog::-webkit-scrollbar{width:3px}
+.fm .fw{font-weight:bold}.fm .fx{color:#555}
+#sbar{padding:4px 10px;background:#030308;font-size:9px;color:#1a1a3a;
+  border-top:1px solid #08080f;display:flex;justify-content:space-between;flex-shrink:0}
+#active{color:#e94560;font-weight:bold}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="cv-col"><canvas id="c"></canvas></div>
+  <div id="sidebar">
+    <div id="hdr">
+      <div id="hdr-title">⚡ Johns Command Center</div>
+      <div id="hdr-sub">12 AGENTS · PIXEL OFFICE</div>
+      <div id="conn-row"><div id="cdot"></div><span id="ctxt">Connecting...</span></div>
+    </div>
+    <div id="alist"></div>
+    <div id="feed">
+      <div id="fhdr">▶ Live Feed</div>
+      <div id="flog"></div>
+    </div>
+    <div id="sbar"><span><span id="active">0</span> active</span><span id="tk">⏱ 0</span></div>
+  </div>
+</div>
+<script>
+// ── Constants (matching pixel-agents exactly) ─────────────────────────────────
+const TILE = 16;          // world tile size in pixels
+const ZOOM = 3;           // render scale (3x = 48px tiles)
+const S = TILE * ZOOM;    // 48px — one tile on screen
+
+// Character sprite constants from pixel-agents/shared/assets/constants.ts
+const CHAR_W = 16;        // sprite frame width
+const CHAR_H = 32;        // sprite frame height (NOT 16!)
+const FRAMES_PER_ROW = 7; // 7 animation frames per direction
+// Direction rows in sprite sheet
+const DIR_DOWN  = 0;
+const DIR_UP    = 1;
+const DIR_RIGHT = 2;
+// Left = flip of right row
+
+const COLS = 24, ROWS = 20;
+const WS = 'ws://localhost:3000';
+
+// 12 agents — col/row is their desk tile
+const DEFS = [
+  {id:'scholar',  name:'Scholar',  emoji:'🎓',color:'#4fc3f7',col:2, row:3, si:0},
+  {id:'biz',      name:'Biz',      emoji:'💼',color:'#81c784',col:7, row:3, si:1},
+  {id:'research', name:'Research', emoji:'🔬',color:'#ffb74d',col:12,row:3, si:2},
+  {id:'atlas',    name:'Atlas',    emoji:'📅',color:'#ce93d8',col:17,row:3, si:3},
+  {id:'finance',  name:'Finance',  emoji:'💰',color:'#f48fb1',col:22,row:3, si:4},
+  {id:'exercise', name:'Exercise', emoji:'💪',color:'#80cbc4',col:2, row:10,si:5},
+  {id:'social',   name:'Social',   emoji:'📣',color:'#fff176',col:7, row:10,si:0},
+  {id:'nutrition',name:'Nutrition',emoji:'🍽',color:'#a5d6a7',col:12,row:10,si:1},
+  {id:'mental',   name:'Mental',   emoji:'🧠',color:'#ef9a9a',col:17,row:10,si:2},
+  {id:'comms',    name:'Comms',    emoji:'✉️',color:'#90caf9',col:22,row:10,si:3},
+  {id:'knowledge',name:'Knowledge',emoji:'📚',color:'#ffe082',col:7, row:17,si:4},
+  {id:'it',       name:'IT',       emoji:'💻',color:'#b0bec5',col:12,row:17,si:5},
+];
+
+// Agent runtime state
+// World coords: x,y in pixels (not tiles). Anchor = bottom-center.
+const agents = {};
+DEFS.forEach(d => {
+  // Anchor bottom-center at tile center
+  const wx = d.col * TILE + TILE / 2;
+  const wy = d.row * TILE + TILE;  // bottom of tile
+  agents[d.id] = {
+    ...d,
+    // World pixel positions
+    wx, wy,        // current (world)
+    tx: wx, ty: wy, // target (world)
+    action: 'idle', thought: '...', busy: false,
+    // Animation
+    frame: 0, frameTimer: 0,
+    dir: DIR_DOWN,
+    flip: false,
+    // Walk timing
+    walkTimer: 0,
+    // Idle bob
+    bobPhase: Math.random() * Math.PI * 2,
+  };
+});
+
+// ── Canvas ──────────────────────────────────────────────────────────────────
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+ctx.imageSmoothingEnabled = false;
+
+function resize() {
+  const col = document.getElementById('cv-col');
+  canvas.width = col.clientWidth;
+  canvas.height = col.clientHeight;
+  centerCam();
+}
+
+// Camera: offsets to center the office
+let camX = 0, camY = 0;
+function centerCam() {
+  const offW = COLS * S, offH = ROWS * S;
+  camX = Math.max(0, (offW - canvas.width) / 2);
+  camY = Math.max(0, (offH - canvas.height) / 2);
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ── Assets ──────────────────────────────────────────────────────────────────
+const imgs = {};
+let loaded = 0;
+const assetList = [
+  ['f0','assets/floors/floor_0.png'],['f1','assets/floors/floor_1.png'],
+  ['f2','assets/floors/floor_2.png'],['f3','assets/floors/floor_3.png'],
+  ['wall','assets/walls/wall_0.png'],
+  ['desk_f','assets/furniture/DESK/DESK_FRONT.png'],
+  ['desk_s','assets/furniture/DESK/DESK_SIDE.png'],
+  ['pc1','assets/furniture/PC/PC_FRONT_ON_1.png'],
+  ['pc2','assets/furniture/PC/PC_FRONT_ON_2.png'],
+  ['pc3','assets/furniture/PC/PC_FRONT_ON_3.png'],
+  ['plant','assets/furniture/PLANT/PLANT.png'],
+  ['lplant','assets/furniture/LARGE_PLANT/LARGE_PLANT.png'],
+  ['book','assets/furniture/BOOKSHELF/BOOKSHELF.png'],
+  ['dbook','assets/furniture/DOUBLE_BOOKSHELF/DOUBLE_BOOKSHELF.png'],
+  ['wboard','assets/furniture/WHITEBOARD/WHITEBOARD.png'],
+  ['sofa_f','assets/furniture/SOFA/SOFA_FRONT.png'],
+  ['sofa_s','assets/furniture/SOFA/SOFA_SIDE.png'],
+  ['ctable','assets/furniture/COFFEE_TABLE/COFFEE_TABLE.png'],
+  ['coffee','assets/furniture/COFFEE/COFFEE.png'],
+  ['cactus','assets/furniture/CACTUS/CACTUS.png'],
+  ['clock','assets/furniture/CLOCK/CLOCK.png'],
+  ['hplant','assets/furniture/HANGING_PLANT/HANGING_PLANT.png'],
+  ['painting','assets/furniture/LARGE_PAINTING/LARGE_PAINTING.png'],
+  ['painting2','assets/furniture/SMALL_PAINTING/SMALL_PAINTING.png'],
+  ['wchair','assets/furniture/WOODEN_CHAIR/WOODEN_CHAIR_FRONT.png'],
+  ['bin','assets/furniture/BIN/BIN.png'],
+];
+for (let i = 0; i < 6; i++) assetList.push([`ch${i}`, `assets/characters/char_${i}.png`]);
+
+assetList.forEach(([k, src]) => {
+  const img = new Image();
+  img.onload = img.onerror = () => loaded++;
+  img.src = src;
+  imgs[k] = img;
+});
+const totalAssets = assetList.length;
+function assetsReady() { return loaded >= totalAssets; }
+
+// Pre-built offscreen canvases for each character frame (keyed by "si_row_frame_flip")
+const frameCache = {};
+function getFrame(si, row, frame, flip) {
+  const key = `${si}_${row}_${frame}_${flip?1:0}`;
+  if (frameCache[key]) return frameCache[key];
+  const img = imgs[`ch${si % 6}`];
+  if (!img || !img.complete || !img.naturalWidth) return null;
+  const oc = document.createElement('canvas');
+  oc.width = CHAR_W * ZOOM;
+  oc.height = CHAR_H * ZOOM;
+  const oc2 = oc.getContext('2d');
+  oc2.imageSmoothingEnabled = false;
+  if (flip) {
+    oc2.translate(CHAR_W * ZOOM, 0);
+    oc2.scale(-1, 1);
+  }
+  oc2.drawImage(img,
+    frame * CHAR_W, row * CHAR_H, CHAR_W, CHAR_H,
+    0, 0, CHAR_W * ZOOM, CHAR_H * ZOOM
+  );
+  frameCache[key] = oc;
+  return oc;
+}
+
+// ── Drawing helpers ──────────────────────────────────────────────────────────
+// Draw a sprite image at world tile position (col, row)
+function sprTile(key, col, row) {
+  const img = imgs[key];
+  if (!img || !img.complete || !img.naturalWidth) return;
+  ctx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight,
+    col*S - camX, row*S - camY,
+    img.naturalWidth * ZOOM, img.naturalHeight * ZOOM);
+}
+
+// ── Floor ──────────────────────────────────────────────────────────────────
+function drawFloor() {
+  const keys = ['f0','f1','f2','f3'];
+  for (let r = 1; r < ROWS-1; r++) {
+    for (let c = 1; c < COLS-1; c++) {
+      const x = c*S - camX, y = r*S - camY;
+      if (x < -S || y < -S || x > canvas.width+S || y > canvas.height+S) continue;
+      const k = keys[(c*3 + r*7) % keys.length];
+      const img = imgs[k] || imgs['f0'];
+      if (img && img.complete) ctx.drawImage(img, 0,0,16,16, x,y,S,S);
+    }
+  }
+}
+
+// ── Walls ──────────────────────────────────────────────────────────────────
+function drawWalls() {
+  const img = imgs['wall'];
+  if (!img || !img.complete) return;
+  // Use top-left 16×16 of wall sheet as wall block
+  for (let c = 0; c < COLS; c++) {
+    ctx.drawImage(img, 0,0,16,16, c*S-camX, 0-camY, S, S);
+    // Wall shadow
+    const g = ctx.createLinearGradient(0, S-camY, 0, S+8-camY);
+    g.addColorStop(0,'rgba(0,0,0,.45)'); g.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle = g; ctx.fillRect(c*S-camX, S-camY, S, 8);
+  }
+  for (let r = 1; r < ROWS; r++) {
+    ctx.drawImage(img, 0,0,16,16, 0-camX, r*S-camY, S, S);
+    ctx.drawImage(img, 0,0,16,16, (COLS-1)*S-camX, r*S-camY, S, S);
+  }
+  for (let c = 0; c < COLS; c++)
+    ctx.drawImage(img, 0,0,16,16, c*S-camX, (ROWS-1)*S-camY, S, S);
+}
+
+// ── Furniture ──────────────────────────────────────────────────────────────
+function drawFurniture(pcTick) {
+  const pcKey = ['pc1','pc2','pc3'][Math.floor(pcTick/40) % 3];
+
+  // Agent desks
+  DEFS.forEach(d => {
+    // DESK_FRONT is 48×32 pixels → covers 3×2 tiles
+    const deskImg = imgs['desk_f'];
+    if (deskImg && deskImg.complete) {
+      ctx.drawImage(deskImg, 0, 0, deskImg.naturalWidth, deskImg.naturalHeight,
+        (d.col-1)*S - camX, (d.row+1)*S - camY,
+        deskImg.naturalWidth*ZOOM, deskImg.naturalHeight*ZOOM);
+    }
+    // PC on desk
+    const pcImg = imgs[pcKey];
+    if (pcImg && pcImg.complete) {
+      ctx.drawImage(pcImg, 0,0,16,32,
+        d.col*S - camX, (d.row+1)*S - camY, S, S*2);
+    }
+  });
+
+  // Shared office items [key, col, row]
+  [
+    ['wboard',  0,  1], ['clock',   11, 0],
+    ['painting',4,  0], ['painting2',8, 0], ['painting2',16, 0],
+    ['book',    0,  5], ['book',    0,  6], ['dbook',   0,  7],
+    ['plant',   1,  1], ['plant',   22, 1], ['lplant',  22,18],
+    ['cactus',  5,  1], ['cactus',  19, 1], ['hplant',  14, 1],
+    ['sofa_f',  8, 14], ['sofa_s', 10, 14], ['ctable',  9, 15],
+    ['wchair',  6, 14], ['wchair',  8, 14],
+    ['coffee', 22,  7], ['bin',    22, 13], ['bin',     1, 13],
+  ].forEach(([k,c,r]) => sprTile(k, c, r));
+}
+
+// ── Characters — correct pixel-agents rendering ──────────────────────────────
+// pixel-agents anchors characters at BOTTOM-CENTER in world coords
+// Walk: 4 frames (cols 0-3), Idle: frame 1, Typing: frames 0-1 cols 4-5
+
+const WALK_SPEED = 48; // px/sec (matches pixel-agents WALK_SPEED_PX_PER_SEC)
+let lastTime = 0;
+
+function drawAgents(ts) {
+  const dt = Math.min((ts - lastTime) / 1000, 0.1);
+  lastTime = ts;
+
+  // Sort by world Y (bottom coord) for proper depth order
+  const sorted = [...DEFS].sort((a,b) => agents[a.id].wy - agents[b.id].wy);
+
+  sorted.forEach(d => {
+    const a = agents[d.id];
+
+    // ── Movement ──────────────────────────────────────────────────────────
+    const dx = a.tx - a.wx, dy = a.ty - a.wy;
+    const dist = Math.sqrt(dx*dx + dy*dy);
+    const moving = dist > 0.5;
+
+    if (moving) {
+      const step = Math.min(WALK_SPEED * dt, dist);
+      a.wx += (dx/dist) * step;
+      a.wy += (dy/dist) * step;
+
+      // Direction from movement delta
+      if (Math.abs(dx) > Math.abs(dy)) {
+        a.dir = DIR_RIGHT;
+        a.flip = dx < 0; // left = flipped right
+      } else {
+        a.dir = dy > 0 ? DIR_DOWN : DIR_UP;
+        a.flip = false;
+      }
+
+      // Walk animation: 4 frames
+      a.frameTimer += dt;
+      if (a.frameTimer > 0.15) { a.frameTimer = 0; a.frame = (a.frame + 1) % 4; }
+    } else {
+      // Idle: frame 1 (standing still)
+      a.frame = 1;
+      a.frameTimer = 0;
+      // Gentle idle bob using world Y offset
+    }
+
+    // ── Screen position (bottom-center anchor, matching pixel-agents) ─────
+    const sx = Math.round(a.wx * ZOOM - camX);
+    const sy = Math.round(a.wy * ZOOM - camY); // bottom of character
+
+    // Skip if way offscreen
+    if (sx < -S*3 || sy < -S*3 || sx > canvas.width+S*3 || sy > canvas.height+S*3) return;
+
+    // Idle bob offset (visual only)
+    const bob = moving ? 0 : Math.sin(ts * 0.002 + a.bobPhase) * 1.5;
+
+    // ── Draw character sprite ─────────────────────────────────────────────
+    const frame = getFrame(d.si, a.dir, a.frame, a.flip);
+    const charW = CHAR_W * ZOOM; // 48px
+    const charH = CHAR_H * ZOOM; // 96px
+
+    if (frame) {
+      // Draw at (sx - charW/2, sy - charH + bob) — bottom-center anchor
+      ctx.drawImage(frame, sx - charW/2, sy - charH + bob);
+    } else {
+      // Fallback circle (shown before sprites load)
+      ctx.beginPath();
+      ctx.arc(sx, sy - charH/2 + bob, S/2, 0, Math.PI*2);
+      ctx.fillStyle = d.color + '33';
+      ctx.fill();
+      ctx.strokeStyle = d.color;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+
+    // ── Glow ring when busy ───────────────────────────────────────────────
+    if (a.busy) {
+      const pulse = 0.5 + 0.5 * Math.sin(ts * 0.005);
+      ctx.beginPath();
+      ctx.arc(sx, sy - charH/2 + bob, charW/2 + 4 + pulse*3, 0, Math.PI*2);
+      ctx.strokeStyle = d.color + Math.floor(60 + pulse*80).toString(16).padStart(2,'0');
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+
+    // ── Name label (above head) ───────────────────────────────────────────
+    ctx.font = 'bold 9px "Courier New", monospace';
+    ctx.textAlign = 'center';
+    const nameY = sy - charH - 4 + bob;
+    ctx.fillStyle = 'rgba(0,0,0,.8)';
+    const tw = ctx.measureText(d.name).width;
+    ctx.fillRect(sx - tw/2 - 3, nameY - 10, tw + 6, 12);
+    ctx.fillStyle = d.color;
+    ctx.fillText(d.name, sx, nameY);
+
+    // ── Action indicator ──────────────────────────────────────────────────
+    if (a.action !== 'idle') {
+      ctx.font = '13px serif';
+      ctx.fillText(a.action==='work'?'⚙️':a.action==='talk'?'💬':'🔍',
+        sx, sy - charH - 18 + bob);
+    }
+
+    // ── Thought bubble ────────────────────────────────────────────────────
+    if (a.busy && a.thought && a.thought !== '...') {
+      const txt = a.thought.length > 30 ? a.thought.slice(0,27)+'…' : a.thought;
+      ctx.font = '9px "Courier New",monospace';
+      ctx.textAlign = 'center';
+      const bw = Math.min(ctx.measureText(txt).width + 10, 170);
+      const bx = sx - bw/2, by = sy - charH - 36 + bob;
+      ctx.fillStyle = 'rgba(8,8,24,.92)';
+      ctx.strokeStyle = d.color + 'aa';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(bx, by, bw, 14, 2);
+      ctx.fill(); ctx.stroke();
+      ctx.fillStyle = d.color + 'dd';
+      ctx.fillText(txt, sx, by + 11);
+    }
+  });
+}
+
+// ── Sidebar ──────────────────────────────────────────────────────────────────
+function buildSidebar() {
+  const list = document.getElementById('alist');
+  if (list.children.length) return;
+  DEFS.forEach(d => {
+    const card = document.createElement('div');
+    card.className = 'ac';
+    card.id = 'card-' + d.id;
+    card.style.setProperty('--c', d.color);
+    card.innerHTML =
+      `<div class="an">${d.emoji} ${d.name}</div>` +
+      `<div class="at" id="th-${d.id}">...</div>` +
+      `<div class="as"><span class="ad" id="dt-${d.id}"></span>` +
+      `<span class="aa" id="ac-${d.id}">idle</span></div>`;
+    list.appendChild(card);
+  });
+}
+
+function updateCard(id) {
+  const a = agents[id];
+  const card = document.getElementById('card-' + id);
+  const th = document.getElementById('th-' + id);
+  const dt = document.getElementById('dt-' + id);
+  const ac = document.getElementById('ac-' + id);
+  if (!card) return;
+  card.className = 'ac' + (a.busy ? ' on' : '');
+  if (th) th.textContent = a.thought || '...';
+  if (dt) dt.className = 'ad ' + (a.action || '');
+  if (ac) ac.textContent = a.action || 'idle';
+}
+
+function addFeed(who, txt, color) {
+  const log = document.getElementById('flog');
+  const d = document.createElement('div');
+  d.className = 'fm';
+  d.innerHTML = `<span class="fw" style="color:${color||'#e94560'}">${who}</span>` +
+    `<span class="fx">: ${String(txt).slice(0, 65)}</span>`;
+  log.prepend(d);
+  while (log.children.length > 50) log.lastChild.remove();
+}
+
+// ── Colyseus ─────────────────────────────────────────────────────────────────
+let room = null;
+function connect() {
+  if (typeof Colyseus === 'undefined') { setTimeout(connect, 300); return; }
+  const client = new Colyseus.Client(WS);
+  client.joinOrCreate('office').then(r => {
+    room = r;
+    document.getElementById('cdot').className = 'on';
+    document.getElementById('ctxt').textContent = '12 agents online';
+    addFeed('System', 'Connected', '#00ff88');
+
+    r.state.agents.onAdd((agent, agentId) => {
+      if (!agents[agentId]) return;
+      agent.onChange(() => {
+        const a = agents[agentId];
+        const prev = a.action;
+        a.action = agent.action || 'idle';
+        a.thought = agent.thought || '...';
+        a.busy = a.action !== 'idle';
+
+        // When agent starts working, wander 1-2 tiles from desk
+        if (a.busy && prev === 'idle') {
+          const d = DEFS.find(x => x.id === agentId);
+          if (d) {
+            const wx = d.col * TILE + TILE / 2 + (Math.random() - 0.5) * TILE * 2;
+            const wy = d.row * TILE + TILE + (Math.random() - 0.5) * TILE;
+            a.tx = wx; a.ty = wy;
+          }
+        } else if (!a.busy) {
+          // Return to desk
+          const d = DEFS.find(x => x.id === agentId);
+          if (d) { a.tx = d.col * TILE + TILE / 2; a.ty = d.row * TILE + TILE; }
+        }
+        updateCard(agentId);
+      });
+    });
+
+    r.onMessage('chat', msg => {
+      const d = DEFS.find(x => x.name.toLowerCase() === msg.sender.toLowerCase());
+      addFeed(msg.sender, msg.text, d ? d.color : '#e94560');
+    });
+
+    r.onLeave(() => {
+      document.getElementById('cdot').className = '';
+      document.getElementById('ctxt').textContent = 'Reconnecting...';
+      setTimeout(connect, 3000);
+    });
+  }).catch(() => setTimeout(connect, 3000));
+}
+
+// ── Main loop ─────────────────────────────────────────────────────────────────
+let pcTick = 0, tick = 0;
+
+function render(ts) {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  if (!assetsReady()) {
+    ctx.fillStyle = '#0d0d1a';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const pct = Math.floor(loaded / totalAssets * 100);
+    ctx.fillStyle = '#e94560';
+    ctx.font = 'bold 12px "Courier New"';
+    ctx.textAlign = 'center';
+    ctx.fillText('LOADING SPRITES ' + pct + '%', canvas.width/2, canvas.height/2 - 10);
+    ctx.fillStyle = '#1a1a3a';
+    ctx.fillRect(canvas.width/2 - 100, canvas.height/2 + 5, 200, 8);
+    ctx.fillStyle = '#e94560';
+    ctx.fillRect(canvas.width/2 - 100, canvas.height/2 + 5, pct * 2, 8);
+    requestAnimationFrame(render);
+    return;
+  }
+
+  pcTick++;
+  drawFloor();
+  drawWalls();
+  drawFurniture(pcTick);
+  drawAgents(ts);
+
+  // Vignette
+  const vg = ctx.createRadialGradient(
+    canvas.width/2, canvas.height/2, canvas.height * 0.25,
+    canvas.width/2, canvas.height/2, canvas.height * 0.85
+  );
+  vg.addColorStop(0, 'rgba(0,0,0,0)');
+  vg.addColorStop(1, 'rgba(0,0,0,0.55)');
+  ctx.fillStyle = vg;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Scanlines
+  ctx.fillStyle = 'rgba(0,0,0,0.03)';
+  for (let y = 0; y < canvas.height; y += 3) ctx.fillRect(0, y, canvas.width, 1);
+
+  tick++;
+  if (tick % 60 === 0) {
+    const active = DEFS.filter(d => agents[d.id].busy).length;
+    document.getElementById('active').textContent = active;
+    document.getElementById('tk').textContent = '⏱ ' + tick;
+  }
+
+  requestAnimationFrame(render);
+}
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+buildSidebar();
+requestAnimationFrame(render);
+</script>
+<script src="https://cdn.jsdelivr.net/npm/colyseus.js@0.15.19/dist/colyseus.js"
+  onload="connect()" onerror="setTimeout(connect,1000)"></script>
+</body>
+</html>

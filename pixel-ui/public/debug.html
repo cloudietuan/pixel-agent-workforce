@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head><title>Bridge Debug</title></head>
+<body style="background:#000;color:#0f0;font-family:monospace;padding:20px">
+<h2>Johns Command Center — Bridge Debug</h2>
+<div id="log"></div>
+<script>
+const log = (msg, color='#0f0') => {
+  const d = document.createElement('div');
+  d.style.color = color;
+  d.textContent = new Date().toISOString().slice(11,19) + ' ' + msg;
+  document.getElementById('log').prepend(d);
+};
+
+log('Page loaded');
+
+// Test message listener
+window.addEventListener('message', (e) => {
+  log('MSG: ' + JSON.stringify(e.data).slice(0,100), '#ff0');
+});
+
+// Test bridge functions
+setTimeout(() => {
+  log('bridge_spawnAgents: ' + typeof window.__bridge_spawnAgents, '#0ff');
+  log('colyseus_postMessage: ' + typeof window.__colyseus_postMessage, '#0ff');
+
+  if (typeof window.__bridge_spawnAgents === 'function') {
+    log('Calling spawnAgents...', '#f80');
+    window.__bridge_spawnAgents();
+  }
+}, 1000);
+
+// Listen for all dispatched messages
+const orig = window.dispatchEvent.bind(window);
+window.dispatchEvent = function(e) {
+  if (e.type === 'message') {
+    log('DISPATCH: ' + JSON.stringify(e.data).slice(0,80), '#f0f');
+  }
+  return orig(e);
+};
+</script>
+</body>
+</html>
