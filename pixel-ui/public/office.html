@@ -157,7 +157,7 @@ DEFS.forEach(d => {
     dir: DIR_DOWN,
     flip: false,
     // Wander behavior (Pokemon-style NPC wandering)
-    wanderTimer: 1 + Math.random() * 3, // first wander after 1-4s
+    wanderTimer: 0.2 + Math.random() * 1.5, // first wander after 0.2-1.7s
     wanderCount: 0,
     wanderLimit: 3 + Math.floor(Math.random() * 4), // 3-6 moves before rest
     pausedAt: 0, // time still standing
@@ -923,23 +923,19 @@ function connect() {
       if (!agents[agentId]) return;
       agent.onChange(() => {
         const a = agents[agentId];
-        const prev = a.action;
+        const prevBusy = a.busy;
         a.action = agent.action || 'idle';
         a.thought = agent.thought || '...';
         a.busy = a.action !== 'idle';
 
-        // When agent starts working, wander 1-2 tiles from desk
-        if (a.busy && prev === 'idle') {
-          const d = DEFS.find(x => x.id === agentId);
-          if (d) {
-            const wx = d.col * TILE + TILE / 2 + (Math.random() - 0.5) * TILE * 2;
-            const wy = d.row * TILE + TILE + (Math.random() - 0.5) * TILE;
-            a.tx = wx; a.ty = wy;
-          }
-        } else if (!a.busy) {
-          // Return to desk
-          const d = DEFS.find(x => x.id === agentId);
-          if (d) { a.tx = d.col * TILE + TILE / 2; a.ty = d.row * TILE + TILE; }
+        // When an agent starts thinking, send them back to their desk to work.
+        // When they go idle again, DO NOT override tx/ty — let the wander
+        // system pick their next target so they don't stand frozen at the desk.
+        if (a.busy && !prevBusy) {
+          a.tx = a.deskX; a.ty = a.deskY;
+          a.purpose = null;
+          a.visiting = null;
+          a.wanderTimer = 4 + Math.random() * 3;
         }
         updateCard(agentId);
       });
