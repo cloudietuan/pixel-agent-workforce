@@ -159,7 +159,7 @@ DEFS.forEach(d => {
     // Wander behavior (Pokemon-style NPC wandering)
     wanderTimer: 0, // fire on first frame so agents start walking immediately
     wanderCount: 0,
-    wanderLimit: 3 + Math.floor(Math.random() * 4), // 3-6 moves before rest
+    wanderLimit: 6 + Math.floor(Math.random() * 5), // 6-10 moves before rest
     pausedAt: 0, // time still standing
     purpose: null, // 'visit' | 'break' | 'roam' | 'rest' | null
     visiting: null, // buddy id if visiting
@@ -227,13 +227,14 @@ function adjacentWalkable(col, row) {
 }
 
 // Pick a wander target with purpose:
-//   30% visit a buddy agent's desk area
-//   20% take a break (sofa / coffee)
-//   50% roam near own desk
+//   35% visit a buddy agent's desk area (across the whole office)
+//   20% hang out in the break area
+//   15% take a stroll to one of the far corners / points of interest
+//   30% roam anywhere on the floor
 function pickWanderTarget(agent) {
   const roll = Math.random();
 
-  if (roll < 0.30) {
+  if (roll < 0.35) {
     // Visit a buddy
     const buddies = BUDDIES[agent.id] || [];
     if (buddies.length) {
@@ -250,7 +251,7 @@ function pickWanderTarget(agent) {
         }
       }
     }
-  } else if (roll < 0.50) {
+  } else if (roll < 0.55) {
     // Break area
     const spot = BREAK_SPOTS[Math.floor(Math.random() * BREAK_SPOTS.length)];
     if (isWalkable(spot.col, spot.row)) {
@@ -260,14 +261,35 @@ function pickWanderTarget(agent) {
         purpose: 'break',
       };
     }
+  } else if (roll < 0.70) {
+    // Take a stroll to a landmark — coffee, whiteboard, plant corners, doormat
+    const landmarks = [
+      {col: 21, row: 13}, // coffee machine
+      {col: 2,  row: 2},  // whiteboard
+      {col: 2,  row: 18}, // bottom-left plant
+      {col: 21, row: 18}, // bottom-right plant
+      {col: 11, row: 18}, // entrance doormat
+      {col: 12, row: 18},
+      {col: 2,  row: 8},  // left-side bookshelf corridor
+      {col: 21, row: 8},  // right-side bookshelf corridor
+    ];
+    const spot = landmarks[Math.floor(Math.random() * landmarks.length)];
+    const adj = isWalkable(spot.col, spot.row) ? spot : adjacentWalkable(spot.col, spot.row);
+    if (adj) {
+      return {
+        tx: adj.col * TILE + TILE / 2,
+        ty: adj.row * TILE + TILE,
+        purpose: 'stroll',
+      };
+    }
   }
 
-  // Roam near own desk (default)
-  for (let tries = 0; tries < 20; tries++) {
-    const dc = Math.floor(Math.random() * 5) - 2;
-    const dr = Math.floor(Math.random() * 5) - 2;
-    const col = agent.col + dc;
-    const row = agent.row + dr;
+  // Roam ANYWHERE on the office floor (was previously ±2 tiles from desk).
+  // Pick random walkable tiles across the whole grid so agents actually
+  // traverse the full space.
+  for (let tries = 0; tries < 40; tries++) {
+    const col = 1 + Math.floor(Math.random() * (COLS - 2));
+    const row = 1 + Math.floor(Math.random() * (ROWS - 2));
     if (isWalkable(col, row)) {
       return {
         tx: col * TILE + TILE / 2,
@@ -729,19 +751,20 @@ function drawAgents(ts) {
         a.wanderTimer -= dt;
         if (a.wanderTimer <= 0) {
           if (a.wanderCount >= a.wanderLimit) {
-            // Rest cycle — return to desk
+            // Rest cycle — return to desk briefly then roam again
             a.tx = a.deskX; a.ty = a.deskY;
             a.purpose = 'rest';
             a.wanderCount = 0;
-            a.wanderLimit = 3 + Math.floor(Math.random() * 4);
-            a.wanderTimer = 4 + Math.random() * 5; // rest at desk 4-9s
+            a.wanderLimit = 6 + Math.floor(Math.random() * 5);
+            a.wanderTimer = 2 + Math.random() * 2.5; // rest 2-4.5s
           } else {
             const t = pickWanderTarget(a);
             a.tx = t.tx; a.ty = t.ty;
             a.purpose = t.purpose;
             a.visiting = t.visiting || null;
             a.wanderCount++;
-            a.wanderTimer = 2 + Math.random() * 2.5;
+            // Short dwell between wanders so they keep moving
+            a.wanderTimer = 0.8 + Math.random() * 1.6;
           }
         }
       }
