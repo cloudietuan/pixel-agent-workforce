@@ -330,11 +330,73 @@ const GENERIC_CHATTER = [
   'got a sec?','how\'s it going?','status update?','quick sync',
   'checking in','got a minute?','stand-up?','syncing up','got updates',
 ];
+// Ambient "thinking to myself" lines that pop up while agents walk around.
+// Keyed per-role so they reflect what each agent actually does.
+const WALKING_THOUGHTS = {
+  atlas:     ['check calendar','quarterly review','weekly plan','on the move'],
+  scholar:   ['AP Stats prep','Berkeley essay','Harvard draft','chem review'],
+  research:  ['stock ticker check','reading 10-K','citation lookup','market scan'],
+  knowledge: ['archive run','index update','note merge','backup check'],
+  biz:       ['Lumina client','Sunset Nails','pipeline check','next pitch'],
+  finance:   ['FAFSA math','tuition plan','cashflow','runway check'],
+  comms:     ['email draft','reply follow-up','copy edit','client note'],
+  social:    ['post ideas','script pass','hook v2','captions'],
+  exercise:  ['leg day','volley drills','warmup set','stretch time'],
+  nutrition: ['meal prep','macros','hydrate','grocery list'],
+  mental:    ['breathing check','stress ping','5 min pause','reflect'],
+  it:        ['site audit','GitHub scan','SSL check','backup run'],
+};
 function pickChatter(fromId, toId) {
   const key1 = fromId + ':' + toId;
   const key2 = toId + ':' + fromId;
   const pool = PAIR_CHATTER[key1] || PAIR_CHATTER[key2] || GENERIC_CHATTER;
   return pool[Math.floor(Math.random() * pool.length)];
+}
+function pickWalkingThought(id) {
+  const pool = WALKING_THOUGHTS[id] || GENERIC_CHATTER;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+// Meeting events — every 30-60s, randomly summon 3-5 buddies to either the
+// whiteboard (row 1) or the break area for a brief huddle.
+const MEETING_SPOTS = [
+  { name: 'whiteboard', col: 3, row: 2, radius: 2 },
+  { name: 'break',      col: 11, row: 13, radius: 2 },
+  { name: 'coffee',     col: 20, row: 12, radius: 2 },
+];
+let meetingCooldown = 6 + Math.random() * 4; // first huddle in 6-10s
+function tryStartMeeting(dt) {
+  meetingCooldown -= dt;
+  if (meetingCooldown > 0) return;
+  meetingCooldown = 18 + Math.random() * 22;
+  const spot = MEETING_SPOTS[Math.floor(Math.random() * MEETING_SPOTS.length)];
+  // Pick a random "host" agent and 2-3 of their buddies
+  const hostId = DEFS[Math.floor(Math.random() * DEFS.length)].id;
+  const buddies = (BUDDIES[hostId] || []).slice();
+  const attendees = [hostId];
+  while (attendees.length < 3 + Math.floor(Math.random() * 2) && buddies.length) {
+    const idx = Math.floor(Math.random() * buddies.length);
+    attendees.push(buddies.splice(idx, 1)[0]);
+  }
+  attendees.forEach((id, i) => {
+    const a = agents[id];
+    if (!a || a.busy) return;
+    // Spread them out around the meeting spot
+    const angle = (i / attendees.length) * Math.PI * 2;
+    const dc = Math.round(Math.cos(angle) * spot.radius);
+    const dr = Math.round(Math.sin(angle) * spot.radius);
+    let col = spot.col + dc, row = spot.row + dr;
+    if (!isWalkable(col, row)) {
+      const adj = adjacentWalkable(spot.col, spot.row);
+      if (adj) { col = adj.col; row = adj.row; }
+      else return;
+    }
+    a.tx = col * TILE + TILE / 2;
+    a.ty = row * TILE + TILE;
+    a.purpose = 'meeting';
+    a.wanderTimer = 6 + Math.random() * 3; // stay a bit before next wander
+  });
+  addFeed('Office', '🤝 huddle @ ' + spot.name + ' — ' + attendees.map(i => agents[i].name).join(', '), '#ffcc00');
 }
 
 // ── Canvas ──────────────────────────────────────────────────────────────────
@@ -642,6 +704,29 @@ function drawAgents(ts) {
   const dt = Math.min((ts - lastTime) / 1000, 0.1);
   lastTime = ts;
 
+  // Meetings: occasionally summon a group of buddies to a landmark
+  tryStartMeeting(dt);
+
+  // Proximity gossip — when two non-busy agents pass within 1.5 tiles of each
+  // other, pop a quick line above their heads.
+  for (let i = 0; i < DEFS.length; i++) {
+    const a1 = agents[DEFS[i].id];
+    if (a1.busy || a1.chatMsg) continue;
+    for (let j = i + 1; j < DEFS.length; j++) {
+      const a2 = agents[DEFS[j].id];
+      if (a2.busy || a2.chatMsg) continue;
+      const d2 = Math.hypot(a1.wx - a2.wx, a1.wy - a2.wy);
+      if (d2 < TILE * 1.5 && Math.random() < 0.01) {
+        a1.chatMsg = pickChatter(DEFS[i].id, DEFS[j].id);
+        a1.chatTimer = 2;
+        a2.chatMsg = Math.random() < 0.5 ? 'yeah' : 'got it';
+        a2.chatTimer = 1.6;
+        addFeed(DEFS[i].name, '→ ' + DEFS[j].name + ': ' + a1.chatMsg, DEFS[i].color);
+        break;
+      }
+    }
+  }
+
   // Sort by world Y (bottom coord) for proper depth order
   const sorted = [...DEFS].sort((a,b) => agents[a.id].wy - agents[b.id].wy);
 
@@ -657,6 +742,12 @@ function drawAgents(ts) {
       const step = Math.min(WALK_SPEED * dt, dist);
       a.wx += (dx/dist) * step;
       a.wy += (dy/dist) * step;
+
+      // Ambient "thinking while walking" bubble — very occasional
+      if (!a.chatMsg && Math.random() < 0.003) {
+        a.chatMsg = pickWalkingThought(d.id);
+        a.chatTimer = 1.8;
+      }
 
       // Direction from movement delta
       if (Math.abs(dx) > Math.abs(dy)) {
