@@ -152,7 +152,8 @@ DEFS.forEach(d => {
     deskX: wx, deskY: wy, // home desk position (to return to)
     action: 'idle', thought: '...', busy: false,
     // Animation
-    frame: 0, frameTimer: 0,
+    frame: 1, frameTimer: 0,
+    walkStep: 0,
     dir: DIR_DOWN,
     flip: false,
     // Wander behavior (Pokemon-style NPC wandering)
@@ -183,12 +184,14 @@ DEFS.forEach(d => {
     blockTile(d.col + dc, d.row + 2);
   }
 });
-// Sofas and ctable
-[[9,12],[10,12],[13,12],[14,12],[11,13],[12,13]].forEach(([c,r]) => blockTile(c,r));
-// Bookshelves and coffee and bins
-[[1,6],[1,7],[1,12],[1,17],[22,6],[22,7],[22,12],[22,17],[2,18],[21,18]].forEach(([c,r]) => blockTile(c,r));
-// Wboard
-blockTile(1, 1);
+// Break area: sofas, ctable, side chairs, flanking plants
+[[9,12],[10,12],[13,12],[14,12],[11,13],[12,13],
+ [8,13],[15,13],[8,12],[15,12]].forEach(([c,r]) => blockTile(c,r));
+// Left/right wall columns: bookshelves, cactus, coffee, large plants, bins
+[[1,6],[1,7],[1,12],[1,17],[22,6],[22,7],[22,12],[22,17],
+ [2,18],[21,18],[4,18],[19,18]].forEach(([c,r]) => blockTile(c,r));
+// Whiteboard
+blockTile(1, 2);
 
 function isWalkable(col, row) {
   if (col < 1 || row < 1 || col >= COLS-1 || row >= ROWS-1) return false;
@@ -455,23 +458,40 @@ function drawFloor() {
 }
 
 // ── Walls ──────────────────────────────────────────────────────────────────
+// Uses the pixel-agents wall sprite — 16×32 piece: upper 16px is the 3D face
+// (extends above the tile), lower 16px is the floor-level base.
 function drawWalls() {
   const img = imgs['wall'];
   if (!img || !img.complete) return;
-  // Use top-left 16×16 of wall sheet as wall block
+
+  // Pick the "flat center" tile from the 4×4 auto-tile grid (bitmask ~7)
+  // Each piece in walls.png is 16w × 32h.
+  const SW = 16, SH = 32;
+  const bmCol = 3, bmRow = 1; // roughly a flat horizontal piece
+  const sx = bmCol * SW, sy = bmRow * SH;
+
+  // Helper: draw one wall tile with its 3D face extending up by 1 tile
+  const drawWall = (c, r) => {
+    // Sprite is 32px tall → scaled = S*2, draw so bottom aligns with tile's bottom
+    ctx.drawImage(img, sx, sy, SW, SH,
+      c*S - camX, (r-1)*S - camY, S, S*2);
+  };
+
+  // Top wall (row 0) — 3D face extends "up" off-screen, which is fine
+  for (let c = 0; c < COLS; c++) drawWall(c, 0);
+  // Floor-level shadow cast by the back wall
   for (let c = 0; c < COLS; c++) {
-    ctx.drawImage(img, 0,0,16,16, c*S-camX, 0-camY, S, S);
-    // Wall shadow
-    const g = ctx.createLinearGradient(0, S-camY, 0, S+8-camY);
-    g.addColorStop(0,'rgba(0,0,0,.45)'); g.addColorStop(1,'rgba(0,0,0,0)');
-    ctx.fillStyle = g; ctx.fillRect(c*S-camX, S-camY, S, 8);
+    const g = ctx.createLinearGradient(0, S-camY, 0, S+12-camY);
+    g.addColorStop(0,'rgba(0,0,0,.55)'); g.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle = g; ctx.fillRect(c*S-camX, S-camY, S, 12);
   }
+  // Side walls (left + right)
   for (let r = 1; r < ROWS; r++) {
-    ctx.drawImage(img, 0,0,16,16, 0-camX, r*S-camY, S, S);
-    ctx.drawImage(img, 0,0,16,16, (COLS-1)*S-camX, r*S-camY, S, S);
+    drawWall(0, r);
+    drawWall(COLS-1, r);
   }
-  for (let c = 0; c < COLS; c++)
-    ctx.drawImage(img, 0,0,16,16, c*S-camX, (ROWS-1)*S-camY, S, S);
+  // Bottom wall
+  for (let c = 1; c < COLS-1; c++) drawWall(c, ROWS-1);
 }
 
 // ── Furniture ──────────────────────────────────────────────────────────────
@@ -497,16 +517,16 @@ function drawFurniture(pcTick) {
 
   // Shared office items [key, col, row] — no overlap, grouped by zone
   [
-    // Wall decor (row 0 = top wall strip)
-    ['clock',    11, 0], ['clock',     12, 0],
-    ['painting',  2, 0], ['painting2',  7, 0],
-    ['painting', 15, 0], ['painting2', 20, 0],
-    ['hplant',    6, 0], ['hplant',    17, 0],
+    // Wall decor (row 1 — sits below the wall sprite, fills the upper strip)
+    ['clock',    11, 1], ['clock',     12, 1],
+    ['painting',  2, 1], ['painting2',  7, 1],
+    ['painting', 15, 1], ['painting2', 20, 1],
+    ['hplant',    6, 1], ['hplant',    17, 1],
 
     // Left-wall storage column (col 1, between walls and first desk column)
-    ['wboard',  1,  1],
+    ['wboard',  1,  2],
     ['book',    1,  6], ['dbook',    1,  7],
-    ['book',    1, 12],
+    ['cactus',  1, 12],
     ['lplant',  1, 17],
 
     // Right-wall storage column (col 22)
@@ -514,15 +534,20 @@ function drawFurniture(pcTick) {
     ['coffee', 22, 12],
     ['lplant', 22, 17],
 
-    // Walkway decor between row 1 and row 2 of agents (rows 6-7 area)
+    // Walkway decor between row 1 and row 2 of agents
     ['plant',   2, 7],  ['plant',  21, 7],
     ['cactus', 11, 7],  ['cactus', 12, 7],
 
-    // Break area in the middle walkway (rows 12-13)
+    // Break / lounge area — a proper 4-seat couch cluster with side chairs
     ['sofa_f',  9, 12], ['sofa_f', 10, 12], ['sofa_f', 13, 12], ['sofa_f', 14, 12],
     ['ctable', 11, 13],
+    ['wchair',  8, 13], ['wchair',  15, 13],
+    ['plant',   8, 12], ['plant',   15, 12],
 
-    // Bins in bottom corners (floor row 18, just above bottom wall)
+    // Side accents in the lower walkway
+    ['cactus',  4, 18], ['cactus', 19, 18],
+
+    // Bins near walls
     ['bin',     2, 18], ['bin',    21, 18],
   ].forEach(([k,c,r]) => sprTile(k, c, r));
 }
@@ -563,14 +588,40 @@ function drawAgents(ts) {
         a.flip = false;
       }
 
-      // Walk animation: 4 frames
+      // Walk cycle — pixel-agents frames 0,1,2,1 (3 frames, ping-pong)
       a.frameTimer += dt;
-      if (a.frameTimer > 0.15) { a.frameTimer = 0; a.frame = (a.frame + 1) % 4; }
+      if (a.frameTimer > 0.14) {
+        a.frameTimer = 0;
+        a.walkStep = (a.walkStep + 1) % 4;
+        // pattern: 0, 1, 2, 1
+        a.frame = [0, 1, 2, 1][a.walkStep];
+      }
       a.pausedAt = 0;
     } else {
-      // Idle: frame 1 (standing still)
-      a.frame = 1;
-      a.frameTimer = 0;
+      // At desk and busy → typing (frames 3,4) or reading (frames 5,6)
+      // Based on pixel-agents characters.ts — tools decide which animation
+      const atDesk = Math.abs(a.wx - a.deskX) < 2 && Math.abs(a.wy - a.deskY) < 2;
+
+      if (a.busy && atDesk) {
+        a.frameTimer += dt;
+        if (a.frameTimer > 0.22) {
+          a.frameTimer = 0;
+          // Reading tools show frames 5-6, typing/default shows 3-4
+          const readingTools = a.action === 'use_tool' && /read|grep|fetch|search/i.test(a.thought || '');
+          if (readingTools) {
+            a.frame = a.frame === 5 ? 6 : 5;
+          } else {
+            a.frame = a.frame === 3 ? 4 : 3;
+          }
+        }
+        // Face desk
+        a.dir = DIR_DOWN;
+        a.flip = false;
+      } else {
+        // Idle stance
+        a.frame = 1;
+        a.frameTimer = 0;
+      }
       a.pausedAt += dt;
 
       // Face toward desk when arrived home
