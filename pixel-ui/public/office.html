@@ -2,6 +2,9 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>Johns Command Center</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
@@ -1073,10 +1076,17 @@ let pcTick = 0, tick = 0;
 const DEBUG = new URLSearchParams(window.location.search).get('debug') === '1';
 let dbgFps = 0, dbgFrames = 0, dbgAcc = 0;
 
+const BOOT_TS = Date.now();
+const BUILD = 'v6-always-roam';
 function render(ts) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  if (!assetsReady()) {
+  // Only show the loading screen for up to 3 seconds. After that, force the
+  // render loop to run even if an image failed to load — fallback circles
+  // and emoji will stand in for any missing sprites, so the office is never
+  // permanently frozen on "LOADING".
+  const bootElapsed = (Date.now() - BOOT_TS) / 1000;
+  if (!assetsReady() && bootElapsed < 3) {
     ctx.fillStyle = '#0d0d1a';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     const pct = Math.floor(loaded / totalAssets * 100);
@@ -1119,6 +1129,14 @@ function render(ts) {
   // Scanlines
   ctx.fillStyle = 'rgba(0,0,0,0.03)';
   for (let y = 0; y < canvas.height; y += 3) ctx.fillRect(0, y, canvas.width, 1);
+
+  // Build version badge (bottom-left) — proves the new code reached the browser
+  ctx.fillStyle = 'rgba(0,0,0,0.7)';
+  ctx.fillRect(8, canvas.height - 22, 130, 16);
+  ctx.fillStyle = '#00ff88';
+  ctx.font = 'bold 10px "Courier New"';
+  ctx.textAlign = 'left';
+  ctx.fillText('BUILD ' + BUILD, 14, canvas.height - 10);
 
   tick++;
   if (tick % 60 === 0) {
