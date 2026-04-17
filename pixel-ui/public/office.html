@@ -777,15 +777,16 @@ function drawAgents(ts) {
       }
       a.pausedAt = 0;
     } else {
-      // At desk and busy → typing (frames 3,4) or reading (frames 5,6)
-      // Based on pixel-agents characters.ts — tools decide which animation
+      // Standing still — pick an idle / typing / reading animation frame.
+      // Typing/reading plays ONLY when the agent happens to be at their desk
+      // during a rest cycle. Otherwise (paused mid-wander, at break area,
+      // standing next to a buddy) they show the idle stance.
       const atDesk = Math.abs(a.wx - a.deskX) < 2 && Math.abs(a.wy - a.deskY) < 2;
 
-      if (a.busy && atDesk) {
+      if (a.busy && atDesk && (a.purpose === 'rest' || a.purpose === null)) {
         a.frameTimer += dt;
         if (a.frameTimer > 0.22) {
           a.frameTimer = 0;
-          // Reading tools show frames 5-6, typing/default shows 3-4
           const readingTools = a.action === 'use_tool' && /read|grep|fetch|search/i.test(a.thought || '');
           if (readingTools) {
             a.frame = a.frame === 5 ? 6 : 5;
@@ -793,21 +794,13 @@ function drawAgents(ts) {
             a.frame = a.frame === 3 ? 4 : 3;
           }
         }
-        // Face desk
         a.dir = DIR_DOWN;
         a.flip = false;
       } else {
-        // Idle stance
         a.frame = 1;
         a.frameTimer = 0;
       }
       a.pausedAt += dt;
-
-      // Face toward desk when arrived home
-      if (!a.busy && Math.abs(a.wx - a.deskX) < 1 && Math.abs(a.wy - a.deskY) < 1) {
-        a.dir = DIR_DOWN;
-        a.flip = false;
-      }
 
       // Tick chat bubble timer
       if (a.chatTimer > 0) {
@@ -815,21 +808,21 @@ function drawAgents(ts) {
         if (a.chatTimer <= 0) a.chatMsg = null;
       }
 
-      // ── Wander behavior (Pokémon-style idle NPC, with purpose) ───────
-      if (!a.busy) {
+      // ── Wander behavior — runs UNCONDITIONALLY. Agents roam the office
+      // regardless of server-reported busy state. The `busy` flag only
+      // affects bubble text and the at-desk typing animation. This way the
+      // office stays alive even when every agent is mid-Ollama-think.
+      {
         // On arrival at wander target — trigger "interaction" event
         if (a.purpose === 'visit' && a.visiting) {
           const buddy = agents[a.visiting];
           if (buddy) {
-            // Show a chat bubble between them, using pair-specific topics
             a.chatMsg = pickChatter(d.id, a.visiting);
             a.chatTimer = 2.4;
-            // Turn toward buddy
             const bdx = buddy.wx - a.wx;
             if (Math.abs(bdx) > 1) { a.dir = DIR_RIGHT; a.flip = bdx < 0; }
             else a.dir = buddy.wy > a.wy ? DIR_DOWN : DIR_UP;
-            // Buddy acknowledges (if also idle)
-            if (!buddy.busy && !buddy.chatMsg) {
+            if (!buddy.chatMsg) {
               buddy.chatMsg = 'noted';
               buddy.chatTimer = 1.8;
               const bdx2 = a.wx - buddy.wx;
@@ -1040,20 +1033,13 @@ function connect() {
       if (!agents[agentId]) return;
       agent.onChange(() => {
         const a = agents[agentId];
-        const prevBusy = a.busy;
         a.action = agent.action || 'idle';
         a.thought = agent.thought || '...';
         a.busy = a.action !== 'idle';
-
-        // When an agent starts thinking, send them back to their desk to work.
-        // When they go idle again, DO NOT override tx/ty — let the wander
-        // system pick their next target so they don't stand frozen at the desk.
-        if (a.busy && !prevBusy) {
-          a.tx = a.deskX; a.ty = a.deskY;
-          a.purpose = null;
-          a.visiting = null;
-          a.wanderTimer = 4 + Math.random() * 3;
-        }
+        // Server state only drives thought text, action icon and the busy
+        // flag. It NEVER overrides tx/ty — the client-side wander loop is
+        // the sole authority on where agents walk. Otherwise incoming think
+        // ticks would yank them back to their desks every few seconds.
         updateCard(agentId);
       });
     });
@@ -1077,7 +1063,7 @@ const DEBUG = new URLSearchParams(window.location.search).get('debug') === '1';
 let dbgFps = 0, dbgFrames = 0, dbgAcc = 0;
 
 const BOOT_TS = Date.now();
-const BUILD = 'v6-always-roam';
+const BUILD = 'v7-always-wander';
 function render(ts) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
