@@ -157,7 +157,7 @@ DEFS.forEach(d => {
     dir: DIR_DOWN,
     flip: false,
     // Wander behavior (Pokemon-style NPC wandering)
-    wanderTimer: 0.2 + Math.random() * 1.5, // first wander after 0.2-1.7s
+    wanderTimer: 0, // fire on first frame so agents start walking immediately
     wanderCount: 0,
     wanderLimit: 3 + Math.floor(Math.random() * 4), // 3-6 moves before rest
     pausedAt: 0, // time still standing
@@ -956,6 +956,8 @@ function connect() {
 
 // ── Main loop ─────────────────────────────────────────────────────────────────
 let pcTick = 0, tick = 0;
+const DEBUG = new URLSearchParams(window.location.search).get('debug') === '1';
+let dbgFps = 0, dbgFrames = 0, dbgAcc = 0;
 
 function render(ts) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -977,6 +979,10 @@ function render(ts) {
   }
 
   pcTick++;
+  const dt = (ts - (render._ts || ts)) / 1000;
+  render._ts = ts;
+  dbgAcc += dt; dbgFrames++;
+  if (dbgAcc >= 0.5) { dbgFps = dbgFrames / dbgAcc; dbgFrames = 0; dbgAcc = 0; }
   drawFloor();
   drawWalls();
   drawFurniture(pcTick);
@@ -1005,6 +1011,24 @@ function render(ts) {
     const active = DEFS.filter(d => agents[d.id].busy).length;
     document.getElementById('active').textContent = active;
     document.getElementById('tk').textContent = '⏱ ' + tick;
+  }
+
+  // Debug overlay — enable with ?debug=1 in the URL
+  if (DEBUG) {
+    const a0 = agents[DEFS[0].id];
+    const moving = Math.hypot(a0.tx - a0.wx, a0.ty - a0.wy) > 0.5;
+    ctx.fillStyle = 'rgba(0,0,0,.75)';
+    ctx.fillRect(8, 8, 320, 70);
+    ctx.fillStyle = '#00ff88';
+    ctx.font = 'bold 11px "Courier New"';
+    ctx.textAlign = 'left';
+    ctx.fillText('DEBUG  tick=' + tick + '  fps=' + (dbgFps|0), 14, 24);
+    ctx.fillText(DEFS[0].id + '  wx=' + a0.wx.toFixed(1) + ' tx=' + a0.tx.toFixed(1) +
+      '  mv=' + (moving?'Y':'N'), 14, 40);
+    ctx.fillText('wTimer=' + a0.wanderTimer.toFixed(2) + '  busy=' + a0.busy +
+      '  purpose=' + (a0.purpose||'-'), 14, 56);
+    ctx.fillText('assets=' + loaded + '/' + totalAssets +
+      '  room=' + (room ? 'on' : 'off'), 14, 72);
   }
 
   requestAnimationFrame(render);
