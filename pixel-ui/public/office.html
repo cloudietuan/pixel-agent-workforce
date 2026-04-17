@@ -279,11 +279,41 @@ function pickWanderTarget(agent) {
   return { tx: agent.deskX, ty: agent.deskY, purpose: 'rest' };
 }
 
-// Simulate office conversation when two agents meet
-const CHATTER = [
+// Simulate office conversation when two agents meet.
+// Pair-specific lines reference the actual topic each buddy pair shares
+// (taken from context-bible.md inter-agent rules).
+const PAIR_CHATTER = {
+  'atlas:scholar':    ['Berkeley plan?', 'AP Stats ready?', 'calendar check', 'FAFSA deadline?'],
+  'atlas:biz':        ['Lumina pipeline?', 'client next up?', 'weekly priorities'],
+  'atlas:finance':    ['burn check', 'runway ok?', 'FAFSA status'],
+  'atlas:mental':     ['John\'s stress?', 'nudge needed?', 'overload flag?'],
+  'atlas:exercise':   ['practice tonight?', 'car wash Apr 18', 'coaching prep'],
+  'mental:scholar':   ['AP load too heavy?', 'recovery window?'],
+  'mental:exercise':  ['sleep tracking?', 'stress + training?'],
+  'mental:nutrition': ['hydration?', 'cortisol check'],
+  'exercise:nutrition': ['macro timing', 'pre-game fuel', 'carb cycling', 'recovery meal'],
+  'biz:finance':      ['Lumina margins', 'Sunset Nails P&L', 'tier pricing?'],
+  'biz:social':       ['AZ wellness post', 'client case study'],
+  'biz:comms':        ['client email draft', 'scheduling conflict'],
+  'finance:research': ['stock desk note', 'Bay Area COL'],
+  'research:scholar': ['Hinksey refs', 'Harvard citations'],
+  'research:knowledge': ['archive sync', 'citation dump'],
+  'scholar:knowledge': ['note index', 'essay archive'],
+  'social:comms':     ['platform post', 'script review'],
+  'social:it':        ['site SEO check', 'broken links?'],
+  'knowledge:it':     ['backup run?', 'archive health'],
+  'it:biz':           ['Lumina audit', 'GitHub health'],
+};
+const GENERIC_CHATTER = [
   'got a sec?','how\'s it going?','status update?','quick sync',
   'checking in','got a minute?','stand-up?','syncing up','got updates',
 ];
+function pickChatter(fromId, toId) {
+  const key1 = fromId + ':' + toId;
+  const key2 = toId + ':' + fromId;
+  const pool = PAIR_CHATTER[key1] || PAIR_CHATTER[key2] || GENERIC_CHATTER;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
 
 // ── Canvas ──────────────────────────────────────────────────────────────────
 const canvas = document.getElementById('c');
@@ -559,6 +589,33 @@ function drawFurniture(pcTick) {
 const WALK_SPEED = 48; // px/sec (matches pixel-agents WALK_SPEED_PX_PER_SEC)
 let lastTime = 0;
 
+// Footstep dust particles — spawned when agents walk
+const particles = [];
+function spawnDust(sx, sy, color) {
+  particles.push({
+    x: sx + (Math.random() - 0.5) * 6,
+    y: sy - 2,
+    vx: (Math.random() - 0.5) * 0.3,
+    vy: -0.2 - Math.random() * 0.2,
+    life: 0.6 + Math.random() * 0.3,
+    age: 0,
+    size: 1.5 + Math.random() * 1.5,
+    color,
+  });
+}
+function drawParticles(dt) {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.age += dt;
+    if (p.age >= p.life) { particles.splice(i, 1); continue; }
+    p.x += p.vx;
+    p.y += p.vy;
+    const alpha = 1 - p.age / p.life;
+    ctx.fillStyle = p.color + Math.floor(alpha * 140).toString(16).padStart(2, '0');
+    ctx.fillRect(Math.round(p.x), Math.round(p.y), p.size, p.size);
+  }
+}
+
 function drawAgents(ts) {
   const dt = Math.min((ts - lastTime) / 1000, 0.1);
   lastTime = ts;
@@ -595,6 +652,12 @@ function drawAgents(ts) {
         a.walkStep = (a.walkStep + 1) % 4;
         // pattern: 0, 1, 2, 1
         a.frame = [0, 1, 2, 1][a.walkStep];
+        // Dust on foot-down frames (0 and 2)
+        if (a.frame === 0 || a.frame === 2) {
+          const px = Math.round(a.wx * ZOOM - camX);
+          const py = Math.round(a.wy * ZOOM - camY);
+          spawnDust(px, py, '#9a8a70');
+        }
       }
       a.pausedAt = 0;
     } else {
@@ -642,9 +705,9 @@ function drawAgents(ts) {
         if (a.purpose === 'visit' && a.visiting) {
           const buddy = agents[a.visiting];
           if (buddy) {
-            // Show a chat bubble between them
-            a.chatMsg = CHATTER[Math.floor(Math.random() * CHATTER.length)];
-            a.chatTimer = 2.2;
+            // Show a chat bubble between them, using pair-specific topics
+            a.chatMsg = pickChatter(d.id, a.visiting);
+            a.chatTimer = 2.4;
             // Turn toward buddy
             const bdx = buddy.wx - a.wx;
             if (Math.abs(bdx) > 1) { a.dir = DIR_RIGHT; a.flip = bdx < 0; }
@@ -699,9 +762,14 @@ function drawAgents(ts) {
     const charW = CHAR_W * ZOOM; // 48px
     const charH = CHAR_H * ZOOM; // 96px
 
+    // Sitting offset — when typing/reading at desk, shift down so the
+    // character visually sits in their chair (matches pixel-agents).
+    const isTyping = a.frame >= 3 && a.frame <= 6;
+    const sitOffset = isTyping ? 6 * ZOOM : 0;
+
     if (frame) {
-      // Draw at (sx - charW/2, sy - charH + bob) — bottom-center anchor
-      ctx.drawImage(frame, sx - charW/2, sy - charH + bob);
+      // Draw at (sx - charW/2, sy - charH + bob + sitOffset)
+      ctx.drawImage(frame, sx - charW/2, sy - charH + bob + sitOffset);
     } else {
       // Fallback circle (shown before sprites load)
       ctx.beginPath();
@@ -917,6 +985,10 @@ function render(ts) {
   drawWalls();
   drawFurniture(pcTick);
   drawAgents(ts);
+  // Draw dust particles above furniture, below overlays
+  const pdt = Math.min((ts - (render._lastTs || ts)) / 1000, 0.1);
+  render._lastTs = ts;
+  drawParticles(pdt);
 
   // Vignette
   const vg = ctx.createRadialGradient(
