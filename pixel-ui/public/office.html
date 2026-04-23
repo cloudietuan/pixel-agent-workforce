@@ -69,7 +69,11 @@ canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;
     <div id="sbar"><span><span id="active">0</span> active</span><span id="tk">⏱ 0</span></div>
   </div>
 </div>
-<script>
+<script src="https://cdn.jsdelivr.net/npm/colyseus.js@0.15.19/dist/colyseus.js"></script>
+<script type="module">
+// ── Per-agent behavior modules (one file per agent) ───────────────────────────
+import { BEHAVIORS, bDefault } from './agents/index.js';
+
 // ── Constants (matching pixel-agents exactly) ─────────────────────────────────
 const TILE = 16;          // world tile size in pixels
 const ZOOM = 3;           // render scale (3x = 48px tiles)
@@ -85,7 +89,14 @@ const DIR_UP    = 1;
 const DIR_RIGHT = 2;
 // Left = flip of right row
 
-const COLS = 24, ROWS = 20;
+const COLS = 48, ROWS = 20;
+// The world is two rooms:
+//   Office Room:  cols 0-23  (main workspace, 12 agent desks)
+//   Lounge Room:  cols 24-47 (new — recreation, lounge, kitchen, gym area)
+// Divider wall at col 24 with a doorway at rows 9-10
+const ROOM_DIVIDE_COL = 24;
+const DOOR_ROW_TOP = 9;
+const DOOR_ROW_BOT = 10;
 const WS = 'ws://localhost:3000';
 
 // 12 agents — col/row is their desk tile
@@ -102,6 +113,8 @@ const DEFS = [
   {id:'comms',    name:'Comms',    emoji:'✉️',color:'#90caf9',col:22,row:10,si:3},
   {id:'knowledge',name:'Knowledge',emoji:'📚',color:'#ffe082',col:7, row:17,si:4},
   {id:'it',       name:'IT',       emoji:'💻',color:'#b0bec5',col:12,row:17,si:5},
+  // 🐕 Debug — the office dog. Lives in the Lounge Room (right side).
+  {id:'debug',    name:'Debug',    emoji:'🐕',color:'#d4a574',col:36,row:12,si:'dog', noTint:true},
 ];
 
 // Agent runtime state
@@ -176,10 +189,22 @@ const assetList = [
   ['hplant','assets/furniture/HANGING_PLANT/HANGING_PLANT.png'],
   ['painting','assets/furniture/LARGE_PAINTING/LARGE_PAINTING.png'],
   ['painting2','assets/furniture/SMALL_PAINTING/SMALL_PAINTING.png'],
+  ['painting3','assets/furniture/SMALL_PAINTING_2/SMALL_PAINTING_2.png'],
   ['wchair','assets/furniture/WOODEN_CHAIR/WOODEN_CHAIR_FRONT.png'],
+  ['wchair_s','assets/furniture/WOODEN_CHAIR/WOODEN_CHAIR_SIDE.png'],
+  ['cchair','assets/furniture/CUSHIONED_CHAIR/CUSHIONED_CHAIR_FRONT.png'],
+  ['cbench','assets/furniture/CUSHIONED_BENCH/CUSHIONED_BENCH.png'],
+  ['wbench','assets/furniture/WOODEN_BENCH/WOODEN_BENCH.png'],
+  ['pot','assets/furniture/POT/POT.png'],
+  ['plant2','assets/furniture/PLANT_2/PLANT_2.png'],
+  ['stable_f','assets/furniture/SMALL_TABLE/SMALL_TABLE_FRONT.png'],
+  ['table_f','assets/furniture/TABLE_FRONT/TABLE_FRONT.png'],
+  ['sofa_b','assets/furniture/SOFA/SOFA_BACK.png'],
   ['bin','assets/furniture/BIN/BIN.png'],
 ];
 for (let i = 0; i < 6; i++) assetList.push([`ch${i}`, `assets/characters/char_${i}.png`]);
+// 🐕 Dog spritesheet for Debug — same 16x32 format
+assetList.push(['chdog', 'assets/characters/dog.png']);
 
 assetList.forEach(([k, src]) => {
   const img = new Image();
@@ -192,10 +217,41 @@ function assetsReady() { return loaded >= totalAssets; }
 
 // Pre-built offscreen canvases for each character frame (keyed by "si_row_frame_flip")
 const frameCache = {};
-function getFrame(si, row, frame, flip) {
-  const key = `${si}_${row}_${frame}_${flip?1:0}`;
+
+// Parse hex color to RGB
+function hexRGB(hex) {
+  const h = hex.replace('#', '');
+  return {
+    r: parseInt(h.slice(0,2), 16),
+    g: parseInt(h.slice(2,4), 16),
+    b: parseInt(h.slice(4,6), 16),
+  };
+}
+
+// Apply clothing tint via multiply blend over the sprite.
+// Skips fully transparent pixels. Preserves original detail.
+function tintSprite(sourceCanvas, tintHex) {
+  const c = document.createElement('canvas');
+  c.width = sourceCanvas.width;
+  c.height = sourceCanvas.height;
+  const cx = c.getContext('2d');
+  cx.imageSmoothingEnabled = false;
+  // 1. Draw original sprite
+  cx.drawImage(sourceCanvas, 0, 0);
+  // 2. Overlay tint using 'multiply' blend, masked to existing pixels
+  cx.globalCompositeOperation = 'source-atop';
+  cx.fillStyle = tintHex + '66'; // ~40% alpha wash
+  cx.fillRect(0, 0, c.width, c.height);
+  cx.globalCompositeOperation = 'source-over';
+  return c;
+}
+
+function getFrame(si, row, frame, flip, tintHex) {
+  const key = `${si}_${row}_${frame}_${flip?1:0}_${tintHex||'none'}`;
   if (frameCache[key]) return frameCache[key];
-  const img = imgs[`ch${si % 6}`];
+  // Dog (Debug agent) uses string sprite key 'dog'; humans use numeric index.
+  const spriteKey = (typeof si === 'string') ? `ch${si}` : `ch${si % 6}`;
+  const img = imgs[spriteKey];
   if (!img || !img.complete || !img.naturalWidth) return null;
   const oc = document.createElement('canvas');
   oc.width = CHAR_W * ZOOM;
@@ -210,8 +266,10 @@ function getFrame(si, row, frame, flip) {
     frame * CHAR_W, row * CHAR_H, CHAR_W, CHAR_H,
     0, 0, CHAR_W * ZOOM, CHAR_H * ZOOM
   );
-  frameCache[key] = oc;
-  return oc;
+
+  const final = tintHex ? tintSprite(oc, tintHex) : oc;
+  frameCache[key] = final;
+  return final;
 }
 
 // ── Drawing helpers ──────────────────────────────────────────────────────────
@@ -226,11 +284,15 @@ function sprTile(key, col, row) {
 
 // ── Floor ──────────────────────────────────────────────────────────────────
 function drawFloor() {
-  const keys = ['f0','f1','f2','f3'];
+  // Office Room: cooler floor palette (f0, f1, f2)
+  // Lounge Room: warmer floor palette (f2, f3, f1)
+  const officeKeys = ['f0','f1','f2','f0'];
+  const loungeKeys = ['f2','f3','f3','f1'];
   for (let r = 1; r < ROWS-1; r++) {
     for (let c = 1; c < COLS-1; c++) {
       const x = c*S - camX, y = r*S - camY;
       if (x < -S || y < -S || x > canvas.width+S || y > canvas.height+S) continue;
+      const keys = c < ROOM_DIVIDE_COL ? officeKeys : loungeKeys;
       const k = keys[(c*3 + r*7) % keys.length];
       const img = imgs[k] || imgs['f0'];
       if (img && img.complete) ctx.drawImage(img, 0,0,16,16, x,y,S,S);
@@ -242,25 +304,76 @@ function drawFloor() {
 function drawWalls() {
   const img = imgs['wall'];
   if (!img || !img.complete) return;
-  // Use top-left 16×16 of wall sheet as wall block
+  // Top wall (full width of both rooms)
   for (let c = 0; c < COLS; c++) {
     ctx.drawImage(img, 0,0,16,16, c*S-camX, 0-camY, S, S);
-    // Wall shadow
     const g = ctx.createLinearGradient(0, S-camY, 0, S+8-camY);
     g.addColorStop(0,'rgba(0,0,0,.45)'); g.addColorStop(1,'rgba(0,0,0,0)');
     ctx.fillStyle = g; ctx.fillRect(c*S-camX, S-camY, S, 8);
   }
+  // Left + right exterior walls
   for (let r = 1; r < ROWS; r++) {
     ctx.drawImage(img, 0,0,16,16, 0-camX, r*S-camY, S, S);
     ctx.drawImage(img, 0,0,16,16, (COLS-1)*S-camX, r*S-camY, S, S);
   }
+  // Bottom wall
   for (let c = 0; c < COLS; c++)
     ctx.drawImage(img, 0,0,16,16, c*S-camX, (ROWS-1)*S-camY, S, S);
+
+  // ── Interior dividing wall between Office and Lounge ─────────────────────
+  // Vertical wall at col ROOM_DIVIDE_COL, with doorway gap at DOOR_ROW_TOP..BOT
+  for (let r = 1; r < ROWS - 1; r++) {
+    if (r >= DOOR_ROW_TOP && r <= DOOR_ROW_BOT) continue; // leave doorway open
+    ctx.drawImage(img, 0,0,16,16, ROOM_DIVIDE_COL*S - camX, r*S - camY, S, S);
+    // Shadow below each wall piece
+    const g = ctx.createLinearGradient(0, r*S+S-camY, 0, r*S+S+6-camY);
+    g.addColorStop(0, 'rgba(0,0,0,.3)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(ROOM_DIVIDE_COL*S - camX, r*S + S - camY, S, 6);
+  }
+  // Doorway frame accents (thin dark pillars on each side of the gap)
+  ctx.fillStyle = '#1a1028';
+  ctx.fillRect(ROOM_DIVIDE_COL*S - camX + S - 4, (DOOR_ROW_TOP)*S - camY, 4, 4);
+  ctx.fillRect(ROOM_DIVIDE_COL*S - camX + S - 4, (DOOR_ROW_BOT+1)*S - camY - 4, 4, 4);
+  // Room labels floating above each zone
+  ctx.save();
+  ctx.font = 'bold 10px "Courier New", monospace';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = 'rgba(233, 69, 96, 0.35)';
+  ctx.fillText('◆ WORKSPACE ◆', 12*S - camX, S*1.5 - camY);
+  ctx.fillStyle = 'rgba(129, 199, 132, 0.35)';
+  ctx.fillText('◆ LOUNGE ◆', 36*S - camX, S*1.5 - camY);
+  ctx.restore();
 }
 
 // ── Furniture ──────────────────────────────────────────────────────────────
 function drawFurniture(pcTick) {
   const pcKey = ['pc1','pc2','pc3'][Math.floor(pcTick/40) % 3];
+
+  // ── Floor rugs (drawn first so furniture sits on top) ──────────
+  // Lounge rug — warm orange under the sofa area
+  ctx.fillStyle = 'rgba(180, 95, 60, 0.35)';
+  ctx.fillRect(7*S - camX, 13*S - camY, 6*S, 5*S);
+  ctx.strokeStyle = 'rgba(140, 70, 40, 0.55)';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(7*S - camX, 13*S - camY, 6*S, 5*S);
+  // Inner rug pattern
+  ctx.strokeStyle = 'rgba(210, 140, 90, 0.4)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(7*S + 8 - camX, 13*S + 8 - camY, 6*S - 16, 5*S - 16);
+
+  // Meeting rug — cool teal under whiteboard table
+  ctx.fillStyle = 'rgba(60, 120, 130, 0.3)';
+  ctx.fillRect(13*S - camX, 12*S - camY, 4*S, 3*S);
+  ctx.strokeStyle = 'rgba(40, 90, 100, 0.5)';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(13*S - camX, 12*S - camY, 4*S, 3*S);
+
+  // Study rug — muted purple
+  ctx.fillStyle = 'rgba(110, 80, 140, 0.3)';
+  ctx.fillRect(1*S - camX, 13*S - camY, 4*S, 3*S);
+  ctx.strokeStyle = 'rgba(80, 55, 110, 0.5)';
+  ctx.strokeRect(1*S - camX, 13*S - camY, 4*S, 3*S);
 
   // Agent desks
   DEFS.forEach(d => {
@@ -279,17 +392,132 @@ function drawFurniture(pcTick) {
     }
   });
 
-  // Shared office items [key, col, row]
+  // Shared office items [key, col, row] — richly decorated office
   [
-    ['wboard',  0,  1], ['clock',   11, 0],
-    ['painting',4,  0], ['painting2',8, 0], ['painting2',16, 0],
-    ['book',    0,  5], ['book',    0,  6], ['dbook',   0,  7],
-    ['plant',   1,  1], ['plant',   22, 1], ['lplant',  22,18],
-    ['cactus',  5,  1], ['cactus',  19, 1], ['hplant',  14, 1],
-    ['sofa_f',  8, 14], ['sofa_s', 10, 14], ['ctable',  9, 15],
-    ['wchair',  6, 14], ['wchair',  8, 14],
-    ['coffee', 22,  7], ['bin',    22, 13], ['bin',     1, 13],
+    // ── Wall decorations (top row) ─────────────────────────────
+    ['painting',  3,  0], ['clock',    6,  0], ['painting3', 9,  0],
+    ['wboard',   11,  0], ['painting2',15, 0], ['painting',  18, 0],
+    ['hplant',    2,  0], ['hplant',   13, 0], ['hplant',   21, 0],
+
+    // ── Left wall: full library ────────────────────────────────
+    ['book',      0,  5], ['book',    0,  6], ['dbook',    0,  7],
+    ['book',      0,  8], ['dbook',   0,  12], ['book',    0, 13],
+    ['plant',     1,  5], ['cactus',  1,  9], ['pot',      1, 12],
+
+    // ── Right wall: plants + bookshelf ─────────────────────────
+    ['dbook',    23,  5], ['book',    23,  7],
+    ['lplant',   23,  9], ['plant2',  23, 13], ['pot',     23, 15],
+
+    // ── Top row corners: welcoming plants ──────────────────────
+    ['plant',     1,  1], ['plant2',  22,  1],
+    ['cactus',    5,  1], ['cactus',  16, 1],
+
+    // ── Central lounge (rows 13-16) ────────────────────────────
+    ['sofa_b',    8, 13], ['sofa_b',  10, 13],
+    ['sofa_s',    7, 14], ['sofa_s',  11, 14],
+    ['sofa_f',    8, 16], ['sofa_f',  10, 16],
+    ['ctable',    9, 15],
+    ['cchair',    6, 15], ['cchair',  12, 15],
+    ['wbench',    9, 17],
+    ['pot',       6, 13], ['pot',     12, 13],
+
+    // ── Coffee corner (right side) ─────────────────────────────
+    ['coffee',   22,  7], ['stable_f', 20, 7],
+    ['cchair',   19,  8], ['cchair',  20,  8],
+    ['cbench',   18,  9],
+
+    // ── Whiteboard / meeting zone ──────────────────────────────
+    ['table_f',  14, 13], ['wchair',  13, 13], ['wchair_s', 15, 13],
+    ['wchair',   14, 12],
+
+    // ── Study nook (left side) ─────────────────────────────────
+    ['stable_f',  2, 14], ['wchair',   3, 14], ['wchair_s',  1, 14],
+    ['plant',     4, 13],
+
+    // ── Bottom area: kitchen-ish zone ──────────────────────────
+    ['table_f',  18, 17], ['wchair',  18, 16], ['wchair',  19, 16],
+    ['bin',       1, 17], ['bin',     22, 17],
+    ['cactus',   16, 17], ['plant',    5, 17],
+
+    // ── Extra detail dots throughout ───────────────────────────
+    ['pot',       4,  9], ['pot',     19, 13],
+    ['cactus',   11,  8], ['cactus',   9,  8],
+
+    // ═══════════════════════════════════════════════════════════════
+    // ──  LOUNGE ROOM  (cols 25-47) — recreation, rest, chill ─────
+    // ═══════════════════════════════════════════════════════════════
+
+    // ── Top-wall decorations (right room) ──────────────────────
+    ['painting',  28,  0], ['clock',    34,  0], ['painting2', 38,  0],
+    ['painting3', 41,  0], ['hplant',   27,  0], ['hplant',    44,  0],
+
+    // ── Gym / fitness corner (top-left of lounge) ──────────────
+    ['wboard',    26,  0], // workout planning board
+    ['wbench',    27,  3], ['wbench',   29,  3], // workout benches
+    ['cactus',    26,  3],
+
+    // ── Game / entertainment zone (upper-right) ────────────────
+    ['sofa_f',    39,  4], ['sofa_f',   41,  4],
+    ['ctable',    40,  5], // TV table (pretend it's a screen)
+    ['cchair',    38,  5], ['cchair',   43,  5],
+    ['plant2',    45,  3], ['plant',    37,  3],
+
+    // ── Big central lounge seating (middle of room) ────────────
+    ['sofa_b',    32, 10], ['sofa_b',   34, 10],
+    ['sofa_s',    31, 11], ['sofa_s',   35, 11],
+    ['sofa_f',    32, 13], ['sofa_f',   34, 13],
+    ['ctable',    33, 12],
+    ['cchair',    30, 12], ['cchair',   36, 12],
+    ['pot',       30, 10], ['pot',      36, 10],
+
+    // ── Dining / kitchenette (bottom-left of lounge) ───────────
+    ['table_f',   27, 15], ['table_f',  29, 15],
+    ['wchair',    27, 14], ['wchair',   29, 14],
+    ['wchair',    27, 17], ['wchair',   29, 17],
+    ['coffee',    25, 14],
+    ['stable_f',  26, 15],
+
+    // ── Reading nook (bottom-right of lounge) ──────────────────
+    ['book',      46,  7], ['book',     46,  8], ['dbook',    46,  9],
+    ['book',      46, 10], ['book',     46, 11],
+    ['cchair',    44, 14], ['stable_f', 43, 14],
+    ['lplant',    46, 14], ['plant',    42, 15],
+
+    // ── Bottom decoration row (lounge) ─────────────────────────
+    ['cactus',    32, 17], ['cactus',   38, 17],
+    ['bin',       25, 17], ['bin',      46, 17],
+    ['plant',     34, 17], ['pot',      36, 17],
+
+    // ── Wall plants along divider (lounge side) ───────────────
+    ['plant',     25,  6], ['pot',      25, 12],
+    ['hplant',    25,  4],
   ].forEach(([k,c,r]) => sprTile(k, c, r));
+
+  // ── Ambient light halos (soft glowing spots) ────────────────────
+  const lights = [
+    // Office room
+    { col: 6,  row: 0, color: 'rgba(255, 220, 130, 0.15)', r: 80 },
+    { col: 12, row: 0, color: 'rgba(255, 220, 130, 0.15)', r: 80 },
+    { col: 18, row: 0, color: 'rgba(255, 220, 130, 0.15)', r: 80 },
+    { col: 22, row: 7, color: 'rgba(255, 180, 100, 0.18)', r: 60 },
+    { col: 9,  row: 15, color: 'rgba(255, 200, 150, 0.12)', r: 100 },
+    // Lounge room
+    { col: 28, row: 0,  color: 'rgba(255, 200, 140, 0.18)', r: 90 },
+    { col: 35, row: 0,  color: 'rgba(255, 200, 140, 0.18)', r: 90 },
+    { col: 42, row: 0,  color: 'rgba(255, 200, 140, 0.18)', r: 90 },
+    { col: 33, row: 12, color: 'rgba(255, 195, 155, 0.18)', r: 120 }, // lounge glow
+    { col: 40, row: 5,  color: 'rgba(140, 180, 255, 0.14)', r: 80 },  // game/TV glow
+    { col: 25, row: 14, color: 'rgba(255, 160, 80, 0.20)',  r: 60 },  // kitchenette coffee
+    { col: 28, row: 4,  color: 'rgba(130, 200, 160, 0.15)', r: 70 },  // gym corner
+  ];
+  lights.forEach(l => {
+    const cx = l.col*S + S/2 - camX, cy = l.row*S + S/2 - camY;
+    const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, l.r);
+    g.addColorStop(0, l.color);
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(cx - l.r, cy - l.r, l.r*2, l.r*2);
+  });
 }
 
 // ── Characters — correct pixel-agents rendering ──────────────────────────────
@@ -349,7 +577,9 @@ function drawAgents(ts) {
     const bob = moving ? 0 : Math.sin(ts * 0.002 + a.bobPhase) * 1.5;
 
     // ── Draw character sprite ─────────────────────────────────────────────
-    const frame = getFrame(d.si, a.dir, a.frame, a.flip);
+    // Dog skips tinting — keep its natural fur color
+    const tintColor = d.noTint ? null : d.color;
+    const frame = getFrame(d.si, a.dir, a.frame, a.flip, tintColor);
     const charW = CHAR_W * ZOOM; // 48px
     const charH = CHAR_H * ZOOM; // 96px
 
@@ -377,6 +607,11 @@ function drawAgents(ts) {
       ctx.stroke();
     }
 
+    // ── Role emoji badge (above character) ────────────────────────────────
+    ctx.font = '13px serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(d.emoji, sx, sy - charH - 18 + bob);
+
     // ── Name label (above head) ───────────────────────────────────────────
     ctx.font = 'bold 9px "Courier New", monospace';
     ctx.textAlign = 'center';
@@ -387,11 +622,11 @@ function drawAgents(ts) {
     ctx.fillStyle = d.color;
     ctx.fillText(d.name, sx, nameY);
 
-    // ── Action indicator ──────────────────────────────────────────────────
+    // ── Action indicator (above role emoji) ───────────────────────────────
     if (a.action !== 'idle') {
-      ctx.font = '13px serif';
+      ctx.font = '11px serif';
       ctx.fillText(a.action==='work'?'⚙️':a.action==='talk'?'💬':'🔍',
-        sx, sy - charH - 18 + bob);
+        sx + 10, sy - charH - 18 + bob);
     }
 
     // ── Thought bubble ────────────────────────────────────────────────────
@@ -469,24 +704,9 @@ function connect() {
       if (!agents[agentId]) return;
       agent.onChange(() => {
         const a = agents[agentId];
-        const prev = a.action;
         a.action = agent.action || 'idle';
         a.thought = agent.thought || '...';
         a.busy = a.action !== 'idle';
-
-        // When agent starts working, wander 1-2 tiles from desk
-        if (a.busy && prev === 'idle') {
-          const d = DEFS.find(x => x.id === agentId);
-          if (d) {
-            const wx = d.col * TILE + TILE / 2 + (Math.random() - 0.5) * TILE * 2;
-            const wy = d.row * TILE + TILE + (Math.random() - 0.5) * TILE;
-            a.tx = wx; a.ty = wy;
-          }
-        } else if (!a.busy) {
-          // Return to desk
-          const d = DEFS.find(x => x.id === agentId);
-          if (d) { a.tx = d.col * TILE + TILE / 2; a.ty = d.row * TILE + TILE; }
-        }
         updateCard(agentId);
       });
     });
@@ -506,6 +726,32 @@ function connect() {
 
 // ── Main loop ─────────────────────────────────────────────────────────────────
 let pcTick = 0, tick = 0;
+
+// ── Autonomous movement: agents wander and visit each other ──────────────────
+// Each agent independently picks a new destination every few seconds.
+// Sometimes they visit another agent's desk (talk interaction).
+const moveTimers = {};
+DEFS.forEach(d => {
+  moveTimers[d.id] = {
+    nextMoveAt: Date.now() + Math.random() * 4000 + 1000,
+    visiting: null,
+  };
+});
+
+function updateMovement() {
+  const now = Date.now();
+  DEFS.forEach(d => {
+    const a = agents[d.id];
+    const t = moveTimers[d.id];
+    const atTarget = Math.abs(a.wx - a.tx) < 0.5 && Math.abs(a.wy - a.ty) < 0.5;
+    if (!atTarget || now < t.nextMoveAt) return;
+    const behavior = BEHAVIORS[d.id] || bDefault;
+    behavior(a, d, t, now, DEFS);
+    // Clamp target within office bounds
+    a.tx = Math.max(TILE * 2, Math.min((COLS - 2) * TILE, a.tx));
+    a.ty = Math.max(TILE * 2, Math.min((ROWS - 2) * TILE, a.ty));
+  });
+}
 
 function render(ts) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -530,6 +776,7 @@ function render(ts) {
   drawFloor();
   drawWalls();
   drawFurniture(pcTick);
+  updateMovement();
   drawAgents(ts);
 
   // Vignette
@@ -559,8 +806,7 @@ function render(ts) {
 // ── Boot ──────────────────────────────────────────────────────────────────────
 buildSidebar();
 requestAnimationFrame(render);
+connect(); // will retry itself if Colyseus not yet loaded
 </script>
-<script src="https://cdn.jsdelivr.net/npm/colyseus.js@0.15.19/dist/colyseus.js"
-  onload="connect()" onerror="setTimeout(connect,1000)"></script>
 </body>
 </html>
