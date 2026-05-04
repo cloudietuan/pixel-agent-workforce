@@ -67,6 +67,64 @@ canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;
 #sbar{padding:4px 10px;background:#030308;font-size:9px;color:#1a1a3a;
   border-top:1px solid #08080f;display:flex;justify-content:space-between;flex-shrink:0}
 #active{color:#e94560;font-weight:bold}
+
+/* Tabbed lower panel: Feed | Proposals | Portfolio */
+#tabs{display:flex;border-top:1px solid #0f0f2a;background:#04040c;flex-shrink:0}
+.tab{flex:1;padding:6px 4px;font-size:9px;color:#444;letter-spacing:1.5px;
+  text-align:center;cursor:pointer;text-transform:uppercase;
+  border-right:1px solid #0a0a18;transition:background .15s,color .15s}
+.tab:last-child{border-right:none}
+.tab:hover{color:#888;background:#08081a}
+.tab.on{color:#e94560;background:#0a0a18;box-shadow:inset 0 2px 0 #e94560}
+.tab .badge{display:inline-block;margin-left:4px;background:#e94560;color:#fff;
+  font-size:8px;padding:1px 4px;border-radius:6px;min-width:14px}
+.tab .badge.zero{display:none}
+.panel{display:none;flex:1;overflow-y:auto;padding:5px 9px;font-size:10px;line-height:1.55;
+  scrollbar-width:thin;scrollbar-color:#0f0a2a transparent}
+.panel::-webkit-scrollbar{width:3px}
+.panel.on{display:block}
+.panel.empty{color:#333;font-style:italic;padding:18px 12px;text-align:center;font-size:9px}
+
+/* Proposal cards */
+.prop{background:#0a0a18;border:1px solid #1a0a3a;border-left:3px solid #ffcc00;
+  padding:7px 8px;margin:0 0 6px;border-radius:2px}
+.prop-h{font-size:9px;color:#ffcc00;letter-spacing:1px;text-transform:uppercase;
+  display:flex;justify-content:space-between;margin-bottom:4px}
+.prop-by{color:#888;font-size:9px}
+.prop-r{font-size:10px;color:#aaa;margin:3px 0 6px;line-height:1.45}
+.prop-p{font-size:9px;color:#555;font-family:'Courier New',monospace;
+  background:#020208;padding:4px 6px;margin:4px 0 6px;border-radius:2px;
+  white-space:pre-wrap;word-break:break-all;max-height:55px;overflow:hidden}
+.prop-btns{display:flex;gap:4px;margin-top:5px}
+.prop-btn{flex:1;padding:5px;font-size:9px;letter-spacing:1px;text-transform:uppercase;
+  border:none;cursor:pointer;font-family:'Courier New',monospace;border-radius:2px}
+.prop-btn.ok{background:#1a4d2e;color:#7ee787}
+.prop-btn.ok:hover{background:#246a3f}
+.prop-btn.no{background:#4d1a1a;color:#ff8888}
+.prop-btn.no:hover{background:#6a2424}
+
+/* Portfolio cards */
+.port{background:#06060f;border:1px solid #0f0f2a;border-left:3px solid #4fc3f7;
+  padding:7px 9px;margin:0 0 5px;border-radius:2px}
+.port-t{font-size:10px;color:#8ac6ff;font-weight:bold;letter-spacing:.3px;margin-bottom:3px}
+.port-d{font-size:9px;color:#5a6a8a;line-height:1.4}
+
+/* Chat input */
+#chat-row{display:flex;border-top:1px solid #0f0f2a;background:#04040c;flex-shrink:0}
+#chat-in{flex:1;background:#06060f;border:none;padding:7px 9px;color:#bbb;
+  font-family:'Courier New',monospace;font-size:11px;outline:none}
+#chat-in:focus{background:#0a0a18}
+#chat-in::placeholder{color:#222}
+#chat-send{padding:0 12px;background:#1a0035;color:#e94560;border:none;cursor:pointer;
+  font-family:'Courier New',monospace;font-size:10px;letter-spacing:1.5px;text-transform:uppercase}
+#chat-send:hover{background:#2a0050;color:#ff6b88}
+
+/* Header evolution button */
+#evo{margin-top:6px;padding:5px 8px;background:#1a0035;color:#aa88ff;border:none;
+  cursor:pointer;font-family:'Courier New',monospace;font-size:9px;letter-spacing:1.5px;
+  text-transform:uppercase;border-radius:2px;width:100%;transition:background .15s}
+#evo:hover{background:#2a0066;color:#cc99ff}
+#evo:disabled{opacity:.4;cursor:wait}
 </style>
 </head>
 <body>
@@ -77,11 +135,20 @@ canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;
       <div id="hdr-title">⚡ Johns Command Center</div>
       <div id="hdr-sub">12 AGENTS · PIXEL OFFICE</div>
       <div id="conn-row"><div id="cdot"></div><span id="ctxt">Connecting...</span></div>
+      <button id="evo" title="Ask every agent to look around and propose one improvement">✨ Spark Evolution</button>
     </div>
     <div id="alist"></div>
-    <div id="feed">
-      <div id="fhdr">▶ Live Feed</div>
-      <div id="flog"></div>
+    <div id="tabs">
+      <div class="tab on" data-tab="feed">Feed</div>
+      <div class="tab" data-tab="proposals">Proposals<span class="badge zero" id="prop-badge">0</span></div>
+      <div class="tab" data-tab="portfolio">Portfolio</div>
+    </div>
+    <div id="panel-feed" class="panel on" style="height:155px"></div>
+    <div id="panel-proposals" class="panel empty" style="height:155px">No pending proposals.<br><br>Click ✨ Spark Evolution to ask agents to suggest improvements.</div>
+    <div id="panel-portfolio" class="panel empty" style="height:155px">Loading portfolio...</div>
+    <div id="chat-row">
+      <input id="chat-in" type="text" placeholder="Tell the office something..." maxlength="500">
+      <button id="chat-send">Send</button>
     </div>
     <div id="sbar"><span><span id="active">0</span> active</span><span id="tk">⏱ 0</span></div>
   </div>
@@ -1008,15 +1075,112 @@ function updateCard(id) {
   if (ac) ac.textContent = a.action || 'idle';
 }
 
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
 function addFeed(who, txt, color) {
-  const log = document.getElementById('flog');
+  const log = document.getElementById('panel-feed');
   const d = document.createElement('div');
   d.className = 'fm';
-  d.innerHTML = `<span class="fw" style="color:${color||'#e94560'}">${who}</span>` +
-    `<span class="fx">: ${String(txt).slice(0, 65)}</span>`;
+  d.innerHTML = `<span class="fw" style="color:${color||'#e94560'}">${escapeHtml(who)}</span>` +
+    `<span class="fx">: ${escapeHtml(String(txt).slice(0, 80))}</span>`;
   log.prepend(d);
-  while (log.children.length > 50) log.lastChild.remove();
+  while (log.children.length > 80) log.lastChild.remove();
 }
+
+// ── Tab switching ────────────────────────────────────────────────────────────
+document.addEventListener('click', (e) => {
+  const t = e.target.closest('.tab');
+  if (!t) return;
+  document.querySelectorAll('.tab').forEach((el) => el.classList.toggle('on', el === t));
+  const which = t.dataset.tab;
+  ['feed','proposals','portfolio'].forEach((name) => {
+    const p = document.getElementById('panel-' + name);
+    p.classList.toggle('on', name === which);
+  });
+});
+
+// ── Proposals ────────────────────────────────────────────────────────────────
+const pendingProposals = new Map();
+
+function renderProposals() {
+  const panel = document.getElementById('panel-proposals');
+  const badge = document.getElementById('prop-badge');
+  const list = Array.from(pendingProposals.values()).sort((a,b) => b.createdAt.localeCompare(a.createdAt));
+  badge.textContent = String(list.length);
+  badge.classList.toggle('zero', list.length === 0);
+  if (list.length === 0) {
+    panel.classList.add('empty');
+    panel.innerHTML = 'No pending proposals.<br><br>Click ✨ Spark Evolution to ask agents to suggest improvements.';
+    return;
+  }
+  panel.classList.remove('empty');
+  panel.innerHTML = list.map((p) => {
+    const payload = JSON.stringify(p.payload, null, 2).slice(0, 280);
+    return `<div class="prop" data-id="${escapeHtml(p.id)}">
+      <div class="prop-h"><span>${escapeHtml(p.kind)}</span><span class="prop-by">${escapeHtml(p.proposedByName)}</span></div>
+      <div class="prop-r">${escapeHtml(p.reason || '(no reason given)')}</div>
+      <pre class="prop-p">${escapeHtml(payload)}</pre>
+      <div class="prop-btns">
+        <button class="prop-btn ok" data-act="ok">Approve</button>
+        <button class="prop-btn no" data-act="no">Reject</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('.prop-btn');
+  if (!btn || !room) return;
+  const id = btn.closest('.prop').dataset.id;
+  const act = btn.dataset.act;
+  if (act === 'ok') room.send('approve-proposal', { id });
+  else room.send('reject-proposal', { id });
+  // Optimistically remove — server will broadcast proposal-resolved either way.
+  pendingProposals.delete(id);
+  renderProposals();
+});
+
+// ── Portfolio ────────────────────────────────────────────────────────────────
+function renderPortfolio(items) {
+  const panel = document.getElementById('panel-portfolio');
+  if (!items || items.length === 0) {
+    panel.classList.add('empty');
+    panel.innerHTML = 'No portfolio items yet.<br><br>Drop a resume.md into <code>/context</code>.';
+    return;
+  }
+  panel.classList.remove('empty');
+  panel.innerHTML = items.slice(0, 30).map((it) => `
+    <div class="port">
+      <div class="port-t">${escapeHtml(it.title || 'Untitled')}</div>
+      <div class="port-d">${escapeHtml(String(it.detail || '').slice(0, 220))}</div>
+    </div>
+  `).join('');
+}
+
+// ── Chat input ───────────────────────────────────────────────────────────────
+function sendChat() {
+  const input = document.getElementById('chat-in');
+  const text = input.value.trim();
+  if (!text || !room) return;
+  room.send('chat', { text });
+  input.value = '';
+}
+document.getElementById('chat-send').addEventListener('click', sendChat);
+document.getElementById('chat-in').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') sendChat();
+});
+
+// ── Evolution button ─────────────────────────────────────────────────────────
+document.getElementById('evo').addEventListener('click', () => {
+  if (!room) return;
+  room.send('request-evolution', {});
+  const btn = document.getElementById('evo');
+  btn.disabled = true;
+  btn.textContent = '✨ Sparking...';
+  setTimeout(() => { btn.disabled = false; btn.textContent = '✨ Spark Evolution'; }, 4000);
+});
 
 // ── Colyseus ─────────────────────────────────────────────────────────────────
 let room = null;
@@ -1045,9 +1209,38 @@ function connect() {
     });
 
     r.onMessage('chat', msg => {
-      const d = DEFS.find(x => x.name.toLowerCase() === msg.sender.toLowerCase());
+      const d = DEFS.find(x => x.name.toLowerCase() === (msg.sender || '').toLowerCase());
       addFeed(msg.sender, msg.text, d ? d.color : '#e94560');
     });
+
+    // Phase 3 — proposals, portfolio, discoveries
+    r.onMessage('portfolio-state', (m) => renderPortfolio(m.items || []));
+    r.onMessage('proposal-pending', (p) => {
+      pendingProposals.set(p.id, p);
+      renderProposals();
+      addFeed('🛠️ ' + p.proposedByName, 'proposes ' + p.kind, '#ffcc00');
+    });
+    r.onMessage('proposal-resolved', (m) => {
+      pendingProposals.delete(m.id);
+      renderProposals();
+    });
+    r.onMessage('proposals-state', (m) => {
+      pendingProposals.clear();
+      (m.pending || []).forEach((p) => pendingProposals.set(p.id, p));
+      renderProposals();
+    });
+    r.onMessage('discovery', (m) => {
+      addFeed('💡 ' + m.agentName, m.note, '#aa88ff');
+    });
+    // Layout-change broadcasts. office.html generates its own layout
+    // client-side, so we just surface them as feed entries for now.
+    r.onMessage('layout-add', (m) => addFeed('Office', `+ ${m.type} @ (${m.x},${m.y})`, '#00ff88'));
+    r.onMessage('layout-move', (m) => addFeed('Office', `move ${m.uid} → (${m.toX},${m.toY})`, '#00ff88'));
+    r.onMessage('layout-expand', (m) => addFeed('Office', `expand ${m.direction} +${m.amount}`, '#00ff88'));
+
+    // Bootstrap state on connect
+    r.send('request-portfolio');
+    r.send('request-proposals');
 
     r.onLeave(() => {
       document.getElementById('cdot').className = '';
