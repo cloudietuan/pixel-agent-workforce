@@ -68,6 +68,11 @@ export class Agent {
     // Persistent facts about the user / world. Always prepended to the prompt.
     public worldContext: string = '';
 
+    // Things this agent has noticed/learned. Surfaces how each agent's
+    // perspective is "evolving". Capped to keep the prompt small; older
+    // entries get persisted to MemoryStore.
+    public discoveries: string[] = [];
+
     // Current assigned task
     public currentTask: string = '';
 
@@ -147,6 +152,10 @@ export class Agent {
                 ? `Shared team knowledge (things the user has told the office):\n${this.sharedMemories.slice(-8).map(m => `- ${m.content}`).join('\n')}`
                 : '';
 
+            const discoveriesStr = this.discoveries.length > 0
+                ? `What you have personally discovered or noticed so far:\n${this.discoveries.slice(-6).map(d => `- ${d}`).join('\n')}`
+                : '';
+
             const worldStr = this.worldContext
                 ? `=== WHAT YOU KNOW ABOUT THE USER (always reference this) ===\n${this.worldContext.slice(0, 4000)}\n=== END USER CONTEXT ===\n`
                 : '';
@@ -165,6 +174,7 @@ ${taskStr}
 ${messageStr}
 ${memoryStr}
 ${sharedStr}
+${discoveriesStr}
 
 You must decide your next action. Reply ONLY with a JSON object:
 {

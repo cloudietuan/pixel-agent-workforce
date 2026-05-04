@@ -8,6 +8,18 @@ import { ToolExecutor } from '../tools/ToolExecutor';
 import { MemoryStore } from '../memory/MemoryStore';
 import { JOHNS_AGENTS } from '../johns-agents';
 import { ContextUpdate } from '../context-sync';
+import { loadPortfolio, PortfolioItem } from '../portfolio';
+
+export interface OfficeProposal {
+    id: string;
+    proposedBy: string;
+    proposedByName: string;
+    kind: 'add_furniture' | 'move_furniture' | 'expand_grid' | 'add_placard';
+    reason: string;
+    payload: Record<string, unknown>;
+    createdAt: string;
+    status: 'pending' | 'approved' | 'rejected';
+}
 
 interface HighlightEvent {
     type: string;
@@ -39,8 +51,11 @@ export class OfficeRoom extends Room<OfficeState> {
     private inferenceAdapter = process.env.ANTHROPIC_API_KEY
         ? new ClaudeAdapter(process.env.ANTHROPIC_API_KEY)
         : new OllamaAdapter('http://127.0.0.1:11434');
+    // Locked to Sonnet 4.6 per project spec. ANTHROPIC_MODEL env var can
+    // override only to other Sonnet variants; anything else falls back to
+    // claude-sonnet-4-6.
     private inferenceModel = process.env.ANTHROPIC_API_KEY
-        ? (process.env.ANTHROPIC_MODEL || 'claude-haiku-4-5-20251001')
+        ? (process.env.ANTHROPIC_MODEL?.includes('sonnet') ? process.env.ANTHROPIC_MODEL : 'claude-sonnet-4-6')
         : (process.env.OLLAMA_MODEL || 'llama3.2:latest');
     // Back-compat alias so any external reference still works
     private ollamaAdapter = this.inferenceAdapter;
@@ -78,6 +93,11 @@ export class OfficeRoom extends Room<OfficeState> {
     // Cached shared memories, refreshed periodically.
     private sharedMemoryCache: MemoryEntry[] = [];
     private sharedMemoryRefreshAt = 0;
+    // Proposals from agents that need user approval before applying.
+    private proposals: Map<string, OfficeProposal> = new Map();
+    private proposalCounter = 0;
+    // Portfolio items (resume → bible fallback) surfaced to the room.
+    private portfolioItems: PortfolioItem[] = [];
 
     static getActiveRoom(): OfficeRoom | null {
         return OfficeRoom.activeRoom;
@@ -124,7 +144,9 @@ export class OfficeRoom extends Room<OfficeState> {
                     { name: 'web_search', description: 'Search the web for information' },
                     { name: 'write_note', description: 'Write a note or memo' },
                     { name: 'create_task', description: 'Create a task and assign it to yourself or another agent' },
-                    { name: 'hire_agent', description: 'Hire a new team member (intern, developer, designer). Params: { name: string, role: string }' }
+                    { name: 'hire_agent', description: 'Hire a new team member (intern, developer, designer). Params: { name: string, role: string }' },
+                    { name: 'propose_office_change', description: 'Propose a change to the office layout (add/move furniture, expand grid, add a portfolio placard). The user MUST approve before it takes effect. Params: { kind: "add_furniture"|"move_furniture"|"expand_grid"|"add_placard", reason: string, payload: object }' },
+                    { name: 'log_discovery', description: 'Record something new you noticed about the user, your work, or the office. Surfaces in your discoveries log. Params: { note: string }' }
                 ],
                 memory: { shortTermLimit: 50 }
             });
@@ -148,6 +170,16 @@ export class OfficeRoom extends Room<OfficeState> {
             await setupCoreAgent(agentDef.id, agentDef.name, agentDef.role, agentDef.deskX, agentDef.deskY);
             const coreAgent = this.coreAgents.get(agentDef.id);
             if (coreAgent) coreAgent.config.inference.systemPrompt = agentDef.inference.systemPrompt;
+        }
+
+        // Load portfolio (resume.md → bible fallback) — agents reference this
+        // when proposing placards and when answering questions about the user.
+        const portfolio = loadPortfolio();
+        this.portfolioItems = portfolio.items;
+        if (portfolio.sourcePath) {
+            console.log(`[OfficeRoom] Loaded ${portfolio.items.length} portfolio items from ${portfolio.sourcePath}`);
+        } else {
+            console.warn('[OfficeRoom] No resume.md or context-bible.md found — portfolio is empty');
         }
 
         // Load context-bible.md and broadcast it as world-context to every agent.
@@ -249,6 +281,85 @@ export class OfficeRoom extends Room<OfficeState> {
                     status: 'in_progress'
                 });
             }
+        });
+
+        // ─── PROPOSAL FLOW ───
+        // Agent → server: an agent proposes an office change. Server queues
+        // it and broadcasts so the UI can show pending proposals to the user.
+        // The user MUST approve before anything is applied.
+        this.onMessage('propose-change', (_client, message) => {
+            const agentId = String(message?.agentId || '');
+            const kind = String(message?.kind || '');
+            if (!['add_furniture', 'move_furniture', 'expand_grid', 'add_placard'].includes(kind)) return;
+            const agent = this.coreAgents.get(agentId);
+            if (!agent) return;
+            const proposal: OfficeProposal = {
+                id: `prop_${Date.now()}_${++this.proposalCounter}`,
+                proposedBy: agentId,
+                proposedByName: agent.config.name,
+                kind: kind as OfficeProposal['kind'],
+                reason: String(message?.reason || ''),
+                payload: (message?.payload && typeof message.payload === 'object') ? message.payload : {},
+                createdAt: new Date().toISOString(),
+                status: 'pending',
+            };
+            this.proposals.set(proposal.id, proposal);
+            this.broadcast('proposal-pending', proposal);
+            this.broadcast('chat', {
+                sender: '🛠️ ' + agent.config.name,
+                text: `Proposes: ${proposal.kind} — ${proposal.reason}`,
+            });
+        });
+
+        // User → server: approve a proposal. Applies it (or hands off to the
+        // existing layout pipeline) and broadcasts the resolution.
+        this.onMessage('approve-proposal', async (_client, message) => {
+            const id = String(message?.id || '');
+            const p = this.proposals.get(id);
+            if (!p || p.status !== 'pending') return;
+            p.status = 'approved';
+            this.applyProposal(p);
+            this.broadcast('proposal-resolved', { id, status: 'approved' });
+            this.broadcast('chat', { sender: 'System', text: `✅ Approved: ${p.kind} from ${p.proposedByName}` });
+        });
+
+        this.onMessage('reject-proposal', (_client, message) => {
+            const id = String(message?.id || '');
+            const p = this.proposals.get(id);
+            if (!p || p.status !== 'pending') return;
+            p.status = 'rejected';
+            this.broadcast('proposal-resolved', { id, status: 'rejected' });
+            this.broadcast('chat', { sender: 'System', text: `❌ Rejected: ${p.kind} from ${p.proposedByName}` });
+        });
+
+        // User-triggered evolution tick: ask one (or all) agent(s) to think
+        // about what's missing and propose an improvement. Opt-in so we don't
+        // burn API tokens during normal play.
+        this.onMessage('request-evolution', (_client, message) => {
+            const agentId = message?.agentId ? String(message.agentId) : null;
+            const targets = agentId ? [agentId] : Array.from(this.coreAgents.keys());
+            for (const id of targets) {
+                const a = this.coreAgents.get(id);
+                if (!a) continue;
+                a.receiveMessage({
+                    from: 'System',
+                    to: id,
+                    content: 'Look around the office and at what you know about John. Propose ONE improvement to the office (new furniture, a portfolio placard, an expanded zone) by emitting a propose_office_change tool call. Be specific in payload and reason.',
+                    timestamp: new Date().toISOString(),
+                });
+            }
+            this.broadcast('chat', { sender: 'System', text: `🌱 Evolution tick requested for ${targets.length} agent(s)` });
+        });
+
+        // UI requests the current portfolio (placards). Sent on join.
+        this.onMessage('request-portfolio', (client) => {
+            client.send('portfolio-state', { items: this.portfolioItems });
+        });
+
+        this.onMessage('request-proposals', (client) => {
+            client.send('proposals-state', {
+                pending: Array.from(this.proposals.values()).filter((p) => p.status === 'pending'),
+            });
         });
 
         // Save office layout from editor
@@ -359,6 +470,63 @@ export class OfficeRoom extends Room<OfficeState> {
 
                     // ─── HANDLE TOOL EXECUTION ───
                     if (decision.action === 'use_tool' && decision.toolCall) {
+                        // Agent proposes an office change. NEVER auto-applies —
+                        // queues for user approval. The user sees pending
+                        // proposals via the proposal-pending broadcast.
+                        if (decision.toolCall.name === 'propose_office_change') {
+                            const params = decision.toolCall.params || {};
+                            const kind = String(params.kind || '');
+                            if (['add_furniture', 'move_furniture', 'expand_grid', 'add_placard'].includes(kind)) {
+                                const proposal: OfficeProposal = {
+                                    id: `prop_${Date.now()}_${++this.proposalCounter}`,
+                                    proposedBy: id,
+                                    proposedByName: coreAgent.config.name,
+                                    kind: kind as OfficeProposal['kind'],
+                                    reason: String(params.reason || ''),
+                                    payload: (params.payload && typeof params.payload === 'object') ? params.payload : {},
+                                    createdAt: new Date().toISOString(),
+                                    status: 'pending',
+                                };
+                                this.proposals.set(proposal.id, proposal);
+                                this.broadcast('proposal-pending', proposal);
+                                this.broadcast('chat', {
+                                    sender: '🛠️ ' + coreAgent.config.name,
+                                    text: `Proposes ${proposal.kind}: ${proposal.reason.slice(0, 100)}`,
+                                });
+                            }
+                            this.thinkingLocks.set(id, false);
+                            return;
+                        }
+
+                        // Agent records a discovery — surfaces in their prompt
+                        // next cycle and persists to MemoryStore as a high-
+                        // importance memory.
+                        if (decision.toolCall.name === 'log_discovery') {
+                            const note = String(decision.toolCall.params?.note || '').trim();
+                            if (note) {
+                                coreAgent.discoveries = [...coreAgent.discoveries, note].slice(-12);
+                                const entry: MemoryEntry = {
+                                    content: `Discovery: ${note}`,
+                                    type: 'observation',
+                                    timestamp: new Date().toISOString(),
+                                    importance: 0.85,
+                                };
+                                coreAgent.addMemory(entry);
+                                await this.memoryStore.saveMemory(id, entry, this.sessionId);
+                                this.broadcast('chat', {
+                                    sender: '💡 ' + coreAgent.config.name,
+                                    text: note.slice(0, 140),
+                                });
+                                this.broadcast('discovery', {
+                                    agentId: id,
+                                    agentName: coreAgent.config.name,
+                                    note,
+                                });
+                            }
+                            this.thinkingLocks.set(id, false);
+                            return;
+                        }
+
                         // Special case: agent-created tasks
                         if (decision.toolCall.name === 'create_task') {
                             const { title, assignee } = decision.toolCall.params;
@@ -821,6 +989,50 @@ export class OfficeRoom extends Room<OfficeState> {
 
     onLeave(client: Client, consented: boolean) {
         console.log(client.sessionId, "left the office room!");
+    }
+
+    // Apply an approved proposal. Currently a thin layer — most proposal
+    // kinds just broadcast intent so the existing layout/UI pipeline picks
+    // them up. We deliberately keep this conservative: no destructive ops,
+    // grid expansion is bounded.
+    private applyProposal(p: OfficeProposal): void {
+        const payload = p.payload as Record<string, unknown>;
+        switch (p.kind) {
+            case 'add_furniture': {
+                this.broadcast('layout-add', {
+                    proposedBy: p.proposedBy,
+                    type: payload.type,
+                    x: payload.x,
+                    y: payload.y,
+                });
+                break;
+            }
+            case 'move_furniture': {
+                this.broadcast('layout-move', {
+                    uid: payload.uid,
+                    toX: payload.toX,
+                    toY: payload.toY,
+                });
+                break;
+            }
+            case 'expand_grid': {
+                const dir = String(payload.direction || 'right');
+                const amount = Math.max(1, Math.min(4, Number(payload.amount || 1)));
+                this.broadcast('layout-expand', { direction: dir, amount });
+                break;
+            }
+            case 'add_placard': {
+                const item: PortfolioItem = {
+                    id: `placard_${Date.now()}`,
+                    title: String(payload.title || 'Untitled'),
+                    detail: String(payload.detail || ''),
+                    source: 'resume',
+                };
+                this.portfolioItems = [...this.portfolioItems, item];
+                this.broadcast('portfolio-state', { items: this.portfolioItems });
+                break;
+            }
+        }
     }
 
     // Load context-bible.md from disk and apply it as worldContext on every
