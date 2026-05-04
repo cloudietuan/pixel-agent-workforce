@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>John's Command Center · Pixel Agent Workforce</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #07070f;
+  --bg-2: #0d0d1a;
+  --panel: rgba(10,10,22,0.88);
+  --panel-solid: #0a0a18;
+  --line: rgba(255,255,255,0.08);
+  --line-strong: rgba(255,255,255,0.14);
+  --text: #eef1ff;
+  --dim: #8b93b8;
+  --dimmer: #535a7a;
+  --accent: #e94560;
+  --accent-2: #ff6b88;
+  --good: #7ee787;
+  --warn: #ffcc00;
+  --bad:  #ff6b6b;
+  --cool: #8ac6ff;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'Courier New', monospace;
+  --font-ui: 'Space Grotesk', system-ui, sans-serif;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font-family: var(--font-ui); }
+body.theme-terminal { --accent: #00ff88; --accent-2: #00ffaa; --bg: #02060a; --bg-2: #02080c; }
+body.theme-crt { --accent: #ff4081; --accent-2: #ffab40; }
+body.theme-minimal { --accent: #6c5ce7; --accent-2: #a29bfe; --bg: #0c0d14; --bg-2: #12141f; }
+
+/* ─── Layout ─────────────────────────────────────────────────────── */
+#app { position: relative; width: 100vw; height: 100vh; }
+#cv-col { position: absolute; inset: 0; overflow: hidden; background: var(--bg-2); }
+canvas { display: block; position: absolute; inset: 0;
+  image-rendering: pixelated; image-rendering: crisp-edges;
+  width: 100%; height: 100%;
+  touch-action: none; cursor: grab; user-select: none; -webkit-user-select: none; }
+canvas:active { cursor: grabbing; }
+
+/* ─── Top toolbar ────────────────────────────────────────────────── */
+#topbar {
+  position: fixed; top: 0; left: 0; right: 0; min-height: 48px;
+  display: flex; align-items: center; gap: 12px; padding: 8px 16px;
+  background: rgba(7,7,15,0.96);
+  border-bottom: 1px solid var(--line);
+  box-shadow: 0 6px 20px rgba(0,0,0,0.5);
+  z-index: 100;
+  flex-wrap: wrap;
+}
+#topbar > * { pointer-events: auto; }
+#topbar > * { pointer-events: auto; }
+.brand { display: flex; align-items: center; gap: 10px; }
+.brand-mark {
+  width: 28px; height: 28px; display: grid; place-items: center;
+  border: 1px solid var(--accent); border-radius: 6px;
+  font-family: var(--font-mono); font-weight: 700; color: var(--accent);
+  background: radial-gradient(circle at 30% 20%, rgba(233,69,96,0.25), transparent 60%);
+  box-shadow: inset 0 0 8px rgba(233,69,96,0.35), 0 0 14px rgba(233,69,96,0.35);
+  font-size: 13px;
+}
+.brand-t { font-family: var(--font-mono); font-size: 11px; letter-spacing: 3px; color: var(--accent); text-transform: uppercase; font-weight: 700; text-shadow: 0 0 10px rgba(233,69,96,0.6); }
+.brand-s { font-family: var(--font-mono); font-size: 9px; letter-spacing: 2px; color: var(--dimmer); text-transform: uppercase; margin-top: 1px; }
+
+.toolbar-sep { width: 1px; height: 22px; background: var(--line); margin: 0 4px; }
+
+.tb-btn {
+  height: 26px; padding: 0 8px; border-radius: 5px;
+  border: 1px solid var(--line-strong, rgba(255,255,255,0.18));
+  background: rgba(255,255,255,0.08);
+  color: var(--text); font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.5px;
+  cursor: pointer; display: inline-flex; align-items: center; gap: 5px;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.tb-btn:hover { background: rgba(255,255,255,0.08); border-color: var(--line-strong); }
+.tb-btn.on { background: rgba(233,69,96,0.15); border-color: var(--accent); color: var(--accent); }
+.tb-btn .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--dimmer); }
+.tb-btn.on .dot { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+
+.panel-chips { display: flex; gap: 4px; flex-wrap: wrap; }
+
+.status { display: flex; align-items: center; gap: 8px; margin-left: auto; font-family: var(--font-mono); font-size: 10px; }
+.status .cdot { width: 7px; height: 7px; border-radius: 50%; background: var(--good); box-shadow: 0 0 6px var(--good); }
+.status .meta { color: var(--dim); letter-spacing: 1px; }
+
+/* ─── Loading overlay ────────────────────────────────────────────── */
+#loading { position: absolute; inset: 0; display: grid; place-items: center; z-index: 200; background: var(--bg-2); }
+#loading .lb-inner { text-align: center; font-family: var(--font-mono); }
+#loading .lb-title { color: var(--accent); font-size: 14px; letter-spacing: 4px; margin-bottom: 12px; text-shadow: 0 0 12px var(--accent); }
+#loading .lb-bar { width: 220px; height: 6px; background: #1a1a3a; border-radius: 2px; overflow: hidden; margin: 0 auto; }
+#loading .lb-bar > div { height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent-2)); transition: width 0.25s; }
+#loading .lb-pct { color: var(--dim); font-size: 10px; margin-top: 8px; letter-spacing: 2px; }
+
+/* ─── FloatingPanel ──────────────────────────────────────────────── */
+.fp {
+  border-radius: 10px; overflow: hidden;
+  border: 1px solid var(--line); background: var(--panel);
+  color: var(--text); font-family: var(--font-ui);
+  box-shadow: 0 18px 36px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.02) inset;
+  backdrop-filter: blur(8px) saturate(140%);
+  -webkit-backdrop-filter: blur(8px) saturate(140%);
+  transition: box-shadow 0.15s;
+}
+.fp:hover { box-shadow: 0 20px 44px rgba(0,0,0,0.6), 0 0 0 1px var(--accent) inset; }
+.fp-head {
+  cursor: grab; user-select: none;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 10px;
+  background: linear-gradient(90deg, rgba(233,69,96,0.08), rgba(108,92,231,0.05) 60%, transparent);
+  border-bottom: 1px solid var(--line);
+}
+.fp-title { display: flex; align-items: center; gap: 8px; }
+.fp-icon { font-family: var(--font-mono); font-size: 14px; width: 18px; text-align: center; }
+.fp-t { font-family: var(--font-mono); font-size: 11px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--text); }
+.fp-s { font-size: 10px; color: var(--dim); letter-spacing: 0.5px; margin-top: 1px; }
+.fp-actions { display: flex; gap: 4px; }
+.fp-btn {
+  width: 20px; height: 20px; border-radius: 4px;
+  border: 1px solid var(--line); background: rgba(255,255,255,0.04);
+  color: var(--dim); font-family: var(--font-mono); font-size: 12px;
+  line-height: 1; cursor: pointer;
+}
+.fp-btn:hover { background: rgba(255,255,255,0.1); color: var(--text); }
+.fp-body { padding: 10px; position: relative; }
+.fp-body::after {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background: repeating-linear-gradient(0deg, rgba(255,255,255,0.015) 0 1px, transparent 1px 3px);
+  display: var(--scan, none);
+}
+
+/* ─── Atomic utility ─────────────────────────────────────────────── */
+.mono { font-family: var(--font-mono); }
+.small { font-size: 10px; }
+.dim { color: var(--dim); }
+.dimmer { color: var(--dimmer); }
+.row { display: flex; align-items: center; }
+.row.gap > * + * { margin-left: 6px; }
+.row.gap-xs > * + * { margin-left: 3px; }
+.stack > * + * { margin-top: 6px; }
+.empty { color: var(--dimmer); font-style: italic; font-size: 11px; padding: 6px 2px; }
+.footnote { margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--line); font-family: var(--font-mono); font-size: 10px; color: var(--dimmer); letter-spacing: 0.5px; }
+
+/* ─── Buttons / inputs ──────────────────────────────────────────── */
+.btn {
+  height: 26px; padding: 0 10px; border-radius: 5px;
+  border: 1px solid var(--line); background: rgba(255,255,255,0.05);
+  color: var(--text); font-family: var(--font-mono); font-size: 10px;
+  letter-spacing: 1px; cursor: pointer; transition: all 0.12s;
+  display: inline-flex; align-items: center; gap: 4px;
+}
+.btn:hover { background: rgba(255,255,255,0.1); border-color: var(--line-strong); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
+.btn.primary:hover { background: var(--accent-2); border-color: var(--accent-2); }
+.btn.gradient { background: linear-gradient(135deg, #ffadad, #ffd6a5); color: #150f21; border: none; font-weight: 700; }
+.btn.ghost { background: transparent; }
+.btn.full { width: 100%; justify-content: center; margin: 6px 0; }
+.btn.xs { height: 18px; padding: 0 4px; font-size: 9px; min-width: 18px; justify-content: center; }
+.btn.danger { color: var(--bad); }
+.btn[disabled] { opacity: 0.45; cursor: not-allowed; }
+.btn.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+.inp {
+  height: 28px; padding: 0 8px; border-radius: 5px;
+  border: 1px solid var(--line); background: rgba(255,255,255,0.04);
+  color: var(--text); font-family: var(--font-mono); font-size: 11px;
+  flex: 1; outline: none; min-width: 0;
+}
+.inp:focus { border-color: var(--accent); }
+.inp.sm { max-width: 120px; flex: 0 0 auto; }
+select.inp { cursor: pointer; }
+
+.chip {
+  display: inline-flex; align-items: center; gap: 3px;
+  height: 18px; padding: 0 6px; border-radius: 3px;
+  border: 1px solid var(--line); font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.mini-bar { height: 4px; background: rgba(255,255,255,0.06); border-radius: 2px; overflow: hidden; }
+.mini-bar > div { height: 100%; transition: width 0.3s; }
+.mini-bar.tight { height: 3px; }
+
+.chk { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--dim); margin: 8px 0; cursor: pointer; }
+
+/* ─── Chat ──────────────────────────────────────────────────────── */
+.chat-list { max-height: 220px; min-height: 120px; overflow-y: auto; padding: 4px 2px; display: flex; flex-direction: column; gap: 6px; }
+.chat-msg { display: flex; gap: 6px; align-items: baseline; font-size: 11px; line-height: 1.4; }
+.chat-msg.me .chat-who { color: var(--accent) !important; }
+.chat-who { font-family: var(--font-mono); font-weight: 700; font-size: 10px; letter-spacing: 0.5px; white-space: nowrap; }
+.chat-txt { color: var(--text); }
+.chat-input { display: flex; gap: 4px; margin-top: 8px; }
+.chat-input .inp { flex: 1; }
+
+/* ─── Tasks ─────────────────────────────────────────────────────── */
+.task-list { max-height: 240px; overflow-y: auto; margin-top: 10px; display: flex; flex-direction: column; gap: 4px; }
+.task {
+  padding: 6px 8px; border-radius: 4px; border-left: 3px solid var(--dim);
+  background: rgba(255,255,255,0.04);
+}
+.task-top { display: flex; align-items: center; gap: 6px; }
+.task-icon { font-size: 12px; }
+.task-title { font-size: 11px; font-weight: 600; }
+.task-meta { display: flex; justify-content: space-between; align-items: center; margin-top: 3px; font-family: var(--font-mono); font-size: 9px; color: var(--dim); }
+.task-status { letter-spacing: 0.5px; }
+.progress { height: 3px; background: rgba(255,255,255,0.06); border-radius: 2px; overflow: hidden; margin-top: 4px; }
+.progress .bar { height: 100%; transition: width 0.3s; }
+
+/* ─── Pulse ─────────────────────────────────────────────────────── */
+.pulse { display: flex; flex-direction: column; gap: 5px; max-height: 320px; overflow-y: auto; }
+.pulse-row { display: flex; align-items: center; gap: 8px; padding: 4px 2px; border-radius: 4px; cursor: pointer; transition: background 0.1s; }
+.pulse-row:hover { background: rgba(255,255,255,0.05); }
+.pulse-l { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; }
+.pulse-nm { font-family: var(--font-mono); font-size: 10px; font-weight: 700; letter-spacing: 0.5px; }
+.pulse-ac { font-family: var(--font-mono); font-size: 9px; color: var(--dim); letter-spacing: 0.5px; text-transform: uppercase; }
+.pulse-bars { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 3px; width: 130px; }
+.dot { width: 6px; height: 6px; border-radius: 50%; }
+
+/* ─── Inspector ─────────────────────────────────────────────────── */
+.insp { display: flex; flex-direction: column; gap: 10px; }
+.insp-mission { font-size: 11px; color: var(--dim); line-height: 1.45; }
+.insp-thought { padding: 8px; border-radius: 5px; background: rgba(255,255,255,0.04); border-left: 2px solid currentColor; }
+.insp-thought > .mono { font-size: 11px; line-height: 1.45; margin-top: 2px; }
+.stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 10px; }
+.stats > div { display: flex; flex-direction: column; gap: 3px; }
+
+/* ─── Edges ─────────────────────────────────────────────────────── */
+.edge { padding: 6px 4px; border-bottom: 1px solid var(--line); cursor: pointer; transition: background 0.1s; }
+.edge:hover { background: rgba(255,255,255,0.04); }
+.edge:last-child { border-bottom: none; }
+.edge-top { display: flex; align-items: center; justify-content: space-between; font-size: 11px; gap: 4px; }
+.edge-mid { font-family: var(--font-mono); color: var(--dim); font-size: 10px; }
+.edge-bot { display: flex; justify-content: space-between; align-items: center; margin-top: 4px; }
+
+/* ─── Highlights ────────────────────────────────────────────────── */
+.hl { padding: 7px 0; border-bottom: 1px solid var(--line); }
+.hl:last-child { border-bottom: none; }
+.hl-meta { font-family: var(--font-mono); font-size: 9px; letter-spacing: 1px; color: var(--dim); text-transform: uppercase; }
+.hl-title { font-size: 12px; font-weight: 700; margin: 2px 0; }
+.hl-body { font-size: 11px; color: var(--dim); line-height: 1.4; }
+
+/* ─── Log ───────────────────────────────────────────────────────── */
+.log { display: flex; flex-direction: column; overflow-y: auto; line-height: 1.45; font-family: var(--font-mono); }
+.log-row { display: flex; gap: 6px; align-items: baseline; padding: 2px 0; border-bottom: 1px solid rgba(255,255,255,0.03); }
+
+/* ─── Showrunner ────────────────────────────────────────────────── */
+.chaos-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-top: 4px; }
+.chaos-btn {
+  padding: 7px 8px; border-radius: 5px; border: 1px solid var(--line);
+  background: rgba(255,255,255,0.05); color: var(--text);
+  font-family: var(--font-mono); font-size: 10px; cursor: pointer; text-align: left;
+  display: flex; align-items: center; gap: 6px; transition: all 0.1s;
+}
+.chaos-btn:hover { background: rgba(233,69,96,0.12); border-color: var(--accent); color: var(--accent); }
+
+/* ─── Layout editor ─────────────────────────────────────────────── */
+.pal { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
+.pal-btn { font-size: 10px; padding: 0 6px; }
+.pal-btn.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.lay-list { max-height: 180px; overflow-y: auto; font-size: 10px; }
+.lay-row { display: flex; justify-content: space-between; align-items: center; padding: 3px 4px; border-radius: 3px; }
+.lay-row:hover { background: rgba(255,255,255,0.04); }
+
+/* ─── Hover card ────────────────────────────────────────────────── */
+#hover-card {
+  position: absolute; pointer-events: none; z-index: 50;
+  min-width: 160px; padding: 8px 10px; border-radius: 6px;
+  background: rgba(7,7,15,0.95); border: 1px solid var(--line);
+  backdrop-filter: blur(6px); opacity: 0; transition: opacity 0.1s;
+}
+#hover-card.on { opacity: 1; }
+#hover-card .hc-name { font-family: var(--font-mono); font-size: 11px; font-weight: 700; letter-spacing: 0.5px; }
+#hover-card .hc-role { font-family: var(--font-mono); font-size: 9px; color: var(--dim); letter-spacing: 1px; text-transform: uppercase; margin-top: 1px; }
+#hover-card .hc-th { font-size: 11px; color: var(--text); margin-top: 5px; line-height: 1.3; }
+
+/* ─── Tweaks panel ──────────────────────────────────────────────── */
+#tweaks {
+  position: absolute; right: 16px; bottom: 16px; width: 240px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  padding: 12px; z-index: 150; font-family: var(--font-ui);
+  box-shadow: 0 18px 36px rgba(0,0,0,0.55);
+  backdrop-filter: blur(8px);
+  display: none;
+}
+#tweaks.on { display: block; }
+#tweaks h4 { font-family: var(--font-mono); font-size: 10px; letter-spacing: 2px; color: var(--accent); text-transform: uppercase; margin-bottom: 8px; }
+.tw-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; font-size: 11px; }
+.tw-row label { color: var(--dim); font-family: var(--font-mono); font-size: 10px; }
+.tw-swatch-row { display: flex; gap: 4px; }
+.tw-swatch { width: 20px; height: 20px; border-radius: 4px; border: 2px solid transparent; cursor: pointer; }
+.tw-swatch.on { border-color: #fff; }
+.tw-seg { display: flex; gap: 2px; background: rgba(255,255,255,0.05); border-radius: 4px; padding: 2px; }
+.tw-seg button { flex: 1; font-family: var(--font-mono); font-size: 9px; padding: 3px 6px; border: none; background: transparent; color: var(--dim); border-radius: 3px; cursor: pointer; letter-spacing: 0.5px; text-transform: uppercase; }
+.tw-seg button.on { background: var(--accent); color: #fff; }
+
+/* ─── Chaos FX overlay ──────────────────────────────────────────── */
+#fx-banner {
+  position: absolute; top: 60px; left: 50%; transform: translateX(-50%);
+  padding: 8px 14px; background: rgba(233,69,96,0.9); color: #fff;
+  font-family: var(--font-mono); font-size: 11px; letter-spacing: 2px; text-transform: uppercase;
+  border-radius: 6px; font-weight: 700; z-index: 90; opacity: 0;
+  transition: opacity 0.3s, transform 0.3s;
+  box-shadow: 0 8px 24px rgba(233,69,96,0.5);
+}
+#fx-banner.on { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+/* ─── Pan hint onboarding ───────────────────────────────────────── */
+#pan-hint {
+  position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%);
+  padding: 10px 18px; background: rgba(8,8,24,0.85);
+  border: 1px solid rgba(233,69,96,0.4);
+  color: #efe1ff; font-family: var(--font-mono); font-size: 11px;
+  border-radius: 22px; z-index: 40; pointer-events: none;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  opacity: 0; animation: hintFadeIn 0.8s 1.2s ease forwards;
+  letter-spacing: 0.5px;
+}
+#pan-hint.dismissed { animation: hintFadeOut 0.5s ease forwards; }
+#pan-hint kbd {
+  display: inline-block; padding: 1px 5px; margin: 0 2px;
+  background: rgba(233,69,96,0.18); border: 1px solid rgba(233,69,96,0.4);
+  border-radius: 3px; font-size: 10px; color: #ffd6a5;
+}
+@keyframes hintFadeIn { to { opacity: 1; } }
+@keyframes hintFadeOut { to { opacity: 0; transform: translateX(-50%) translateY(8px); } }
+
+/* ─── Chrome reset in minimal theme ─────────────────────────────── */
+body.theme-minimal .brand-mark { box-shadow: inset 0 0 8px rgba(108,92,231,0.35), 0 0 14px rgba(108,92,231,0.35); }
+body.theme-terminal .brand-t,
+body.theme-terminal .fp-head { letter-spacing: 2px; }
+
+/* ─── Density ───────────────────────────────────────────────────── */
+body.density-compact .fp-body { padding: 7px; }
+body.density-compact .task { padding: 4px 6px; }
+body.density-compact .pulse-row { padding: 2px; }
+
+/* scrollbars */
+*::-webkit-scrollbar { width: 4px; height: 4px; }
+*::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 2px; }
+*::-webkit-scrollbar-track { background: transparent; }
+</style>
+</head>
+<body>
+<div id="topbar">
+  <div class="brand">
+    <div class="brand-mark">⚡</div>
+    <div>
+      <div class="brand-t">John's Command Center</div>
+      <div class="brand-s">12 agents · pixel workforce</div>
+    </div>
+  </div>
+  <div class="toolbar-sep"></div>
+  <div class="panel-chips" id="panel-chips"></div>
+  <div class="toolbar-sep"></div>
+  <button class="tb-btn" id="tb-spawn" title="Spawn fake workload">⚡ Spawn work</button>
+  <button class="tb-btn" id="tb-reset" title="Reset panel positions">↺ Reset</button>
+  <div class="status">
+    <span class="cdot"></span>
+    <span class="meta" id="status-meta">live sim · 0 active</span>
+  </div>
+</div>
+
+<div id="app">
+  <div id="cv-col"><canvas id="c"></canvas></div>
+
+  <div id="hover-card"></div>
+  <div id="fx-banner"></div>
+  <div id="pan-hint">drag to pan · <kbd>WASD</kbd> / <kbd>↑↓←→</kbd> · scroll to zoom · pinch on touch</div>
+
+  <div id="loading">
+    <div class="lb-inner">
+      <div class="lb-title">LOADING SPRITES</div>
+      <div class="lb-bar"><div id="lb-fill" style="width: 0%"></div></div>
+      <div class="lb-pct" id="lb-pct">0%</div>
+    </div>
+  </div>
+
+  <div id="panels-root"></div>
+  <div id="tweaks">
+    <h4>◇ Tweaks</h4>
+    <div class="tw-row"><label>Theme</label>
+      <div class="tw-seg" id="tw-theme">
+        <button data-v="neon" class="on">Neon</button>
+        <button data-v="terminal">Terminal</button>
+        <button data-v="crt">CRT</button>
+        <button data-v="minimal">Minimal</button>
+      </div>
+    </div>
+    <div class="tw-row"><label>Density</label>
+      <div class="tw-seg" id="tw-density">
+        <button data-v="cozy" class="on">Cozy</button>
+        <button data-v="compact">Compact</button>
+      </div>
+    </div>
+    <div class="tw-row"><label>Accent</label>
+      <div class="tw-swatch-row" id="tw-accent">
+        <div class="tw-swatch on" data-v="#e94560" style="background:#e94560"></div>
+        <div class="tw-swatch" data-v="#6c5ce7" style="background:#6c5ce7"></div>
+        <div class="tw-swatch" data-v="#00ff88" style="background:#00ff88"></div>
+        <div class="tw-swatch" data-v="#ffd166" style="background:#ffd166"></div>
+        <div class="tw-swatch" data-v="#ff7aa2" style="background:#ff7aa2"></div>
+      </div>
+    </div>
+    <div class="tw-row"><label>Scanlines</label>
+      <div class="tw-seg" id="tw-scan"><button data-v="on" class="on">On</button><button data-v="off">Off</button></div>
+    </div>
+    <div class="tw-row"><label>Cinematic cam</label>
+      <div class="tw-seg" id="tw-cine"><button data-v="on" class="on">On</button><button data-v="off">Off</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- Tweak defaults the host can rewrite -->
+<script>
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "theme": "crt",
+  "density": "compact",
+  "accent": "#e94560",
+  "scanlines": true,
+  "cinematic": true
+}/*EDITMODE-END*/;
+
+// One-time migration: clear stale panel state so new defaultHidden values apply.
+if (!localStorage.getItem('panel-defaults-v4')) {
+  Object.keys(localStorage).filter(k => k.startsWith('panel:')).forEach(k => localStorage.removeItem(k));
+  localStorage.setItem('panel-defaults-v4','1');
+}
+</script>
+
+<!-- React + Babel pinned -->
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<!-- Expose constants/agents/sim to window early -->
+<script type="module">
+import * as A from './agents2.js';
+import * as W from './world5.js';
+import * as SIM from './sim2.js';
+window.AGENTS = A.AGENTS;
+window.BY_ID  = A.BY_ID;
+window.PAIRS  = A.PAIRS;
+window.SCENARIOS = A.SCENARIOS;
+window.CHAOS_EVENTS = A.CHAOS_EVENTS;
+window.W = W;
+window.SIM = SIM;
+window.dispatchEvent(new CustomEvent('deps-ready'));
+</script>
+
+<!-- Bus + React components -->
+<script src="bus.js"></script>
+<script type="text/babel" src="FloatingPanel.jsx"></script>
+<script type="text/babel" src="Panels.jsx"></script>
+
+<script type="text/babel">
+const { useState, useEffect } = React;
+const P = window.Panels;
+
+function CommandCenter() {
+  const [accent, setAccent] = useState(TWEAK_DEFAULTS.accent);
+  const [scan, setScan] = useState(TWEAK_DEFAULTS.scanlines);
+  useEffect(() => {
+    const f = () => setAccent(document.body.style.getPropertyValue('--accent-override') || TWEAK_DEFAULTS.accent);
+    window.addEventListener('accent-change', f);
+    window.addEventListener('scan-change', (e) => setScan(e.detail));
+    return () => { window.removeEventListener('accent-change', f); };
+  }, []);
+  return (
+    <>
+      <P.TaskBoard accent={accent} />
+      <P.EpisodeRecap accent={accent} />
+      <P.StoryPanel accent={accent} />
+      <P.AgentPulseBoard accent={accent} />
+      <P.LayoutEditor accent={accent} />
+      <P.AgentInspector accent={accent} />
+      <P.RelationshipGraph accent={accent} />
+      <P.HighlightsFeed accent={accent} />
+      <P.ShowrunnerControls accent={accent} />
+      <P.SystemLog accent={accent} scanlines={scan} />
+      <P.ChatPanel accent={accent} />
+    </>
+  );
+}
+// wait until deps ready
+function mount() {
+  if (!window.SIM || !window.Panels) { setTimeout(mount, 50); return; }
+  ReactDOM.createRoot(document.getElementById('panels-root')).render(<CommandCenter />);
+}
+window.addEventListener('deps-ready', mount);
+mount();
+</script>
+
+<script type="module" src="main4.js"></script>
+</body>
+</html>
