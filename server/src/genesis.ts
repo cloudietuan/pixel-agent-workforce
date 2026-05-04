@@ -36,6 +36,13 @@ export interface GenesisVote {
     at: string;
 }
 
+export interface CharterVersion {
+    version: number;
+    text: string;
+    draftedAt: string;
+    appliedProposalsAtDraft: number;
+}
+
 export class GenesisStore {
     private db?: Database;
     private _paused = false;
@@ -66,6 +73,12 @@ export class GenesisStore {
             CREATE TABLE IF NOT EXISTS genesis_meta (
                 key TEXT PRIMARY KEY,
                 value TEXT
+            );
+            CREATE TABLE IF NOT EXISTS genesis_charter_history (
+                version INTEGER PRIMARY KEY AUTOINCREMENT,
+                text TEXT NOT NULL,
+                drafted_at TEXT DEFAULT (datetime('now')),
+                applied_proposals_at_draft INTEGER DEFAULT 0
             );
             CREATE INDEX IF NOT EXISTS idx_genesis_status ON genesis_history(status);
         `);
@@ -146,6 +159,35 @@ export class GenesisStore {
             "SELECT COUNT(*) as p, SUM(CASE WHEN status='applied' THEN 1 ELSE 0 END) as a, SUM(CASE WHEN status='rejected' THEN 1 ELSE 0 END) as r FROM genesis_history"
         );
         return { proposals: r?.p || 0, applied: r?.a || 0, rejected: r?.r || 0 };
+    }
+
+    // Save a new charter version. Bumps the version, persists current text
+    // to genesis_meta (for fast read), appends to history table.
+    async saveCharterVersion(text: string, appliedProposalsCount: number): Promise<CharterVersion> {
+        if (!this.db) throw new Error('GenesisStore not initialized');
+        await this.db.run(
+            'INSERT INTO genesis_charter_history (text, applied_proposals_at_draft) VALUES (?, ?)',
+            [text, appliedProposalsCount]
+        );
+        const row = await this.db.get<{ version: number; drafted_at: string }>(
+            'SELECT version, drafted_at FROM genesis_charter_history ORDER BY version DESC LIMIT 1'
+        );
+        await this.setCharter(text);
+        return {
+            version: row?.version || 1,
+            text,
+            draftedAt: row?.drafted_at || new Date().toISOString(),
+            appliedProposalsAtDraft: appliedProposalsCount,
+        };
+    }
+
+    async getCharterHistory(limit: number = 10): Promise<CharterVersion[]> {
+        if (!this.db) return [];
+        const rows = await this.db.all(
+            'SELECT version, text, drafted_at as draftedAt, applied_proposals_at_draft as appliedProposalsAtDraft FROM genesis_charter_history ORDER BY version DESC LIMIT ?',
+            [limit]
+        );
+        return rows as CharterVersion[];
     }
 
     async getEntry(id: string): Promise<GenesisHistoryEntry | null> {

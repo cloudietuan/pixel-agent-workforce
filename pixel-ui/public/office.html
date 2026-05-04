@@ -1350,6 +1350,17 @@ function connect() {
     });
     r.onMessage('genesis-charter', (m) => {
       genesisState.charter = m.charter;
+      if (typeof m.version === 'number') genesisState.charterVersion = m.version;
+      genesisState.drafting = false;
+      // Request fresh history so the new version appears in the list
+      r.send('request-charter-history');
+      renderGenesis();
+    });
+    r.onMessage('genesis-charter-history', (m) => {
+      genesisState.charterHistory = m.versions || [];
+      if (genesisState.charterHistory[0]) {
+        genesisState.charterVersion = genesisState.charterHistory[0].version;
+      }
       renderGenesis();
     });
     r.onMessage('genesis-rollback', (m) => {
@@ -1366,6 +1377,7 @@ function connect() {
     r.send('request-portfolio');
     r.send('request-proposals');
     r.send('request-genesis');
+    r.send('request-charter-history');
 
     r.onLeave(() => {
       document.getElementById('cdot').className = '';
@@ -1381,7 +1393,7 @@ const DEBUG = new URLSearchParams(window.location.search).get('debug') === '1';
 let dbgFps = 0, dbgFrames = 0, dbgAcc = 0;
 
 const BOOT_TS = Date.now();
-const BUILD = 'v10-genesis-panels';
+const BUILD = 'v11-charter-evolution';
 function render(ts) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -1611,12 +1623,15 @@ const genesis = createFloatingPanel({
 
 const genesisState = {
   charter: 'No charter yet. Agents will draft one as they evolve the office.',
+  charterVersion: 0,
+  charterHistory: [],     // [{ version, text, draftedAt }]
   proposals: 0,
   applied: 0,
   rejected: 0,
   paused: false,
   history: [],   // { id, kind, by, reason, status, appliedAt, rolledBack }
   votes: new Map(), // proposalId -> [{ by, vote, reason }]
+  drafting: false,
 };
 
 function renderGenesis() {
@@ -1636,11 +1651,24 @@ function renderGenesis() {
       ${vs.map(v => `<div class="gen-vote"><span class="by">${escapeHtml(v.by)}</span>: <span class="${v.vote==='yes'?'yea':'nay'}">${v.vote}</span> — ${escapeHtml((v.reason||'').slice(0,60))}</div>`).join('')}
     </div>`).join('');
 
+  const charterHistList = genesisState.charterHistory.slice(0, 5).map((v) => `
+    <div style="font-size:9px;color:#666;padding:3px 0;border-bottom:1px dashed #1a1a3a">
+      <span style="color:#aa88ff">v${v.version}</span>
+      <span style="color:#444">· ${escapeHtml((v.draftedAt||'').slice(0,16).replace('T',' '))}</span>
+      <div style="color:#888;margin-top:2px;line-height:1.4">${escapeHtml((v.text||'').slice(0, 140))}</div>
+    </div>`).join('');
+
   genesis.setBody(`
     <div class="gen-section">
-      <div class="gen-h">World Charter</div>
+      <div class="gen-h">World Charter ${genesisState.charterVersion ? `· v${genesisState.charterVersion}` : ''}</div>
       <div class="gen-charter">${escapeHtml(genesisState.charter)}</div>
+      <button class="prop-btn ok" style="width:100%;background:#1a0035;color:#aa88ff;margin-top:4px"
+        ${genesisState.drafting ? 'disabled' : ''}
+        onclick="if(room){room.send('draft-charter');genesisState.drafting=true;renderGenesis();setTimeout(()=>{genesisState.drafting=false;renderGenesis();},5000)}">
+        ${genesisState.drafting ? '✍️ drafting...' : '✍️ Draft new charter'}
+      </button>
     </div>
+    ${charterHistList ? `<div class="gen-section"><div class="gen-h">Charter history</div>${charterHistList}</div>` : ''}
     <div class="gen-section">
       <div class="gen-h">Stats</div>
       <div class="gen-stat"><span>proposed</span><b>${genesisState.proposals}</b></div>

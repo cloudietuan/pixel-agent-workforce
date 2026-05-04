@@ -341,6 +341,12 @@ export class OfficeRoom extends Room<OfficeState> {
             this.votingInFlight.delete(id);
             this.broadcast('proposal-resolved', { id, status: 'approved' });
             this.broadcast('chat', { sender: 'System', text: `✅ Approved: ${p.kind} from ${p.proposedByName}` });
+            // Auto-charter every CHARTER_AUTO_INTERVAL applied proposals.
+            // Cheap (1 LLM call) + cooldown-protected. Async — don't block.
+            const stats = await this.genesis.getStats();
+            if (stats.applied > 0 && stats.applied % OfficeRoom.CHARTER_AUTO_INTERVAL === 0) {
+                void this.draftCharter('auto');
+            }
         });
 
         this.onMessage('reject-proposal', async (_client, message) => {
@@ -405,6 +411,17 @@ export class OfficeRoom extends Room<OfficeState> {
             const v = !!message?.paused;
             await this.genesis.setPaused(v);
             this.broadcast('chat', { sender: 'System', text: v ? '⏸ Evolution paused' : '▶ Evolution resumed' });
+        });
+
+        // Manual charter draft. User clicks "Draft Charter" in the Genesis
+        // panel. Same cooldown as auto.
+        this.onMessage('draft-charter', async () => {
+            void this.draftCharter('manual');
+        });
+
+        this.onMessage('request-charter-history', async (client) => {
+            const versions = await this.genesis.getCharterHistory(10);
+            client.send('genesis-charter-history', { versions });
         });
 
         this.onMessage('rollback-proposal', async (_client, message) => {
@@ -1144,6 +1161,80 @@ export class OfficeRoom extends Room<OfficeState> {
                 this.broadcast('layout-rollback', { proposalId: entry.id, kind: entry.kind, payload });
                 break;
             }
+        }
+    }
+
+    // Draft a new World Charter — one LLM call that synthesizes a paragraph
+    // describing what the office is collectively becoming. Inputs:
+    //   - Every agent's name + role + personality blurb (their "voice")
+    //   - The most recent applied proposals (what's actually been built)
+    //   - The current charter (so the new one feels like a continuation)
+    // Output is saved to genesis_charter_history (versioned) and broadcast.
+    private charterDraftInFlight = false;
+    private lastCharterDraftAt = 0;
+    private static readonly CHARTER_DRAFT_COOLDOWN_MS = 60_000; // 1 minute
+    private static readonly CHARTER_AUTO_INTERVAL = 20;          // every 20 applied
+
+    private async draftCharter(trigger: 'auto' | 'manual'): Promise<void> {
+        const now = Date.now();
+        if (this.charterDraftInFlight) {
+            console.log('[Charter] draft already in flight; skipping');
+            return;
+        }
+        if (now - this.lastCharterDraftAt < OfficeRoom.CHARTER_DRAFT_COOLDOWN_MS) {
+            console.log('[Charter] cooldown active; skipping');
+            return;
+        }
+        this.charterDraftInFlight = true;
+        this.lastCharterDraftAt = now;
+        try {
+            const stats = await this.genesis.getStats();
+            const recent = (await this.genesis.getRecentHistory(20))
+                .filter((h) => h.status === 'applied' && !h.rolledBack);
+
+            const agentVoices = Array.from(this.coreAgents.values())
+                .map((a) => `- ${a.config.name} (${a.config.role}): "${a.config.inference.systemPrompt.split('\n')[0].slice(0, 120)}"`)
+                .join('\n');
+
+            const recentLines = recent
+                .slice(0, 12)
+                .map((h) => `- ${h.by}: ${h.kind} — ${h.reason}`)
+                .join('\n') || '- (no applied changes yet)';
+
+            const prompt = `You are the collective voice of an AI workforce living in a pixel office. Below are the agents who live here, what they have been building, and the current World Charter.
+
+AGENTS:
+${agentVoices}
+
+RECENTLY APPLIED CHANGES:
+${recentLines}
+
+CURRENT CHARTER:
+"${this.genesis.charter}"
+
+Draft a NEW World Charter — one short paragraph (2-4 sentences, ≤ 300 chars) describing what this office is becoming, what the agents collectively believe they are working toward, and how this differs from before. Speak as the collective "we". Be concrete, not generic. Output ONLY the paragraph, no preamble.`;
+
+            const res = await this.inferenceAdapter.complete({
+                model: this.inferenceModel,
+                messages: [{ role: 'user', content: prompt }],
+                temperature: 0.9,
+            });
+            const text = (res.content || '').trim().slice(0, 600);
+            if (!text) {
+                console.warn('[Charter] empty response from LLM, skipping');
+                return;
+            }
+            const version = await this.genesis.saveCharterVersion(text, stats.applied);
+            this.broadcast('genesis-charter', { charter: text, version: version.version });
+            this.broadcast('chat', {
+                sender: '📜 World Charter',
+                text: `v${version.version} (${trigger}): ${text.slice(0, 100)}`,
+            });
+            console.log(`[Charter] drafted v${version.version} (${trigger}) — ${text.slice(0, 80)}`);
+        } catch (err) {
+            console.warn('[Charter] draft failed:', err instanceof Error ? err.message : err);
+        } finally {
+            this.charterDraftInFlight = false;
         }
     }
 
