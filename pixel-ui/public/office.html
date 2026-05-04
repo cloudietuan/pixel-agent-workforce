@@ -126,6 +126,20 @@ canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;
 #evo:hover{background:#2a0066;color:#cc99ff}
 #evo:disabled{opacity:.4;cursor:wait}
 
+/* What's-new hint banner — shown once per build to call out new features */
+#whatsnew{position:absolute;top:12px;left:50%;transform:translateX(-50%);
+  background:#1a0035ee;border:2px solid #aa88ff;color:#cc99ff;
+  padding:10px 18px;font-family:'Courier New',monospace;font-size:11px;
+  letter-spacing:1px;z-index:200;border-radius:3px;
+  box-shadow:0 4px 24px rgba(170,136,255,.4);
+  animation:wnglow 2s ease-out infinite alternate;cursor:pointer;
+  max-width:520px;line-height:1.6}
+#whatsnew b{color:#fff}
+#whatsnew kbd{background:#0a0a18;border:1px solid #aa88ff;padding:1px 5px;
+  border-radius:2px;color:#cc99ff;font-size:10px;margin:0 2px}
+@keyframes wnglow{from{box-shadow:0 4px 16px rgba(170,136,255,.3)}
+  to{box-shadow:0 4px 32px rgba(170,136,255,.7)}}
+
 /* Floating panels (ported from root prototype as vanilla JS) */
 .fp{position:absolute;background:#0a0a18ee;border:2px solid #1a1a3a;border-radius:3px;
   font-family:'Courier New',monospace;color:#bbb;
@@ -1367,7 +1381,7 @@ const DEBUG = new URLSearchParams(window.location.search).get('debug') === '1';
 let dbgFps = 0, dbgFrames = 0, dbgAcc = 0;
 
 const BOOT_TS = Date.now();
-const BUILD = 'v7-always-wander';
+const BUILD = 'v10-genesis-panels';
 function render(ts) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -1422,8 +1436,8 @@ function render(ts) {
 
   // Build version badge (bottom-left) — proves the new code reached the browser
   ctx.fillStyle = 'rgba(0,0,0,0.7)';
-  ctx.fillRect(8, canvas.height - 22, 130, 16);
-  ctx.fillStyle = '#00ff88';
+  ctx.fillRect(8, canvas.height - 22, 200, 16);
+  ctx.fillStyle = '#aa88ff';
   ctx.font = 'bold 10px "Courier New"';
   ctx.textAlign = 'left';
   ctx.fillText('BUILD ' + BUILD, 14, canvas.height - 10);
@@ -1648,6 +1662,25 @@ renderGenesis();
 // Click handling already exists earlier in the file (canvas mousedown);
 // see the addFeed('waves at you') flow — augment via a window-level event.
 window.addEventListener('agent-click', (e) => showInspector(e.detail.id));
+
+// ── What's-new banner (shown once per build) ──────────────────────────────────
+(function showWhatsNew() {
+  const seenKey = 'wn-seen-' + BUILD;
+  if (localStorage.getItem(seenKey)) return;
+  const el = document.createElement('div');
+  el.id = 'whatsnew';
+  el.innerHTML = `<b>NEW in ${BUILD}:</b>
+    <kbd>🔍 Inspector</kbd> + <kbd>🧬 Genesis</kbd> chips top-left ·
+    <kbd>✨ Spark Evolution</kbd> in sidebar ·
+    chat input · proposal/portfolio tabs · Sonnet 4.6 wired
+    <br><span style="color:#888;font-size:9px">Click to dismiss · agents need ANTHROPIC_API_KEY in server/.env to talk</span>`;
+  document.getElementById('app').appendChild(el);
+  el.addEventListener('click', () => {
+    el.remove();
+    localStorage.setItem(seenKey, '1');
+  });
+  setTimeout(() => { el.style.transition = 'opacity 1s'; el.style.opacity = '0.4'; }, 12000);
+})();
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 buildSidebar();
