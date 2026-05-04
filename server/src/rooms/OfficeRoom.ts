@@ -9,6 +9,7 @@ import { MemoryStore } from '../memory/MemoryStore';
 import { JOHNS_AGENTS } from '../johns-agents';
 import { ContextUpdate } from '../context-sync';
 import { loadPortfolio, PortfolioItem } from '../portfolio';
+import { GenesisStore } from '../genesis';
 
 export interface OfficeProposal {
     id: string;
@@ -98,6 +99,11 @@ export class OfficeRoom extends Room<OfficeState> {
     private proposalCounter = 0;
     // Portfolio items (resume → bible fallback) surfaced to the room.
     private portfolioItems: PortfolioItem[] = [];
+    // Genesis: persistent evolution history, votes, charter, pause toggle.
+    private genesis = new GenesisStore();
+    private static readonly GENESIS_MAX_ACTIVE = 50;
+    // Track in-flight voting cycles to avoid double-spawn.
+    private votingInFlight: Set<string> = new Set();
 
     static getActiveRoom(): OfficeRoom | null {
         return OfficeRoom.activeRoom;
@@ -107,8 +113,9 @@ export class OfficeRoom extends Room<OfficeState> {
         OfficeRoom.activeRoom = this;
         this.setState(new OfficeState());
 
-        // Initialize memory store
+        // Initialize memory store + genesis store (shares the SQLite file)
         await this.memoryStore.initialize();
+        await this.genesis.initialize();
 
         const config: OfficeConfig = {
             name: options.name || 'Startup HQ',
@@ -287,7 +294,13 @@ export class OfficeRoom extends Room<OfficeState> {
         // Agent → server: an agent proposes an office change. Server queues
         // it and broadcasts so the UI can show pending proposals to the user.
         // The user MUST approve before anything is applied.
-        this.onMessage('propose-change', (_client, message) => {
+        this.onMessage('propose-change', async (_client, message) => {
+            if (this.genesis.paused) return;
+            const activeApplied = await this.genesis.getActiveAppliedCount();
+            if (activeApplied >= OfficeRoom.GENESIS_MAX_ACTIVE) {
+                this.broadcast('chat', { sender: 'System', text: '⚠️ Mutation cap reached — rollback something to allow more.' });
+                return;
+            }
             const agentId = String(message?.agentId || '');
             const kind = String(message?.kind || '');
             if (!['add_furniture', 'move_furniture', 'expand_grid', 'add_placard'].includes(kind)) return;
@@ -304,11 +317,17 @@ export class OfficeRoom extends Room<OfficeState> {
                 status: 'pending',
             };
             this.proposals.set(proposal.id, proposal);
+            await this.genesis.record({
+                id: proposal.id, kind, by: agent.config.name,
+                reason: proposal.reason, payload: proposal.payload, status: 'pending',
+            });
             this.broadcast('proposal-pending', proposal);
             this.broadcast('chat', {
                 sender: '🛠️ ' + agent.config.name,
                 text: `Proposes: ${proposal.kind} — ${proposal.reason}`,
             });
+            // Kick off agent voting
+            void this.spawnVoting(proposal);
         });
 
         // User → server: approve a proposal. Applies it (or hands off to the
@@ -319,15 +338,18 @@ export class OfficeRoom extends Room<OfficeState> {
             if (!p || p.status !== 'pending') return;
             p.status = 'approved';
             this.applyProposal(p);
+            this.votingInFlight.delete(id);
             this.broadcast('proposal-resolved', { id, status: 'approved' });
             this.broadcast('chat', { sender: 'System', text: `✅ Approved: ${p.kind} from ${p.proposedByName}` });
         });
 
-        this.onMessage('reject-proposal', (_client, message) => {
+        this.onMessage('reject-proposal', async (_client, message) => {
             const id = String(message?.id || '');
             const p = this.proposals.get(id);
             if (!p || p.status !== 'pending') return;
             p.status = 'rejected';
+            await this.genesis.markRejected(id);
+            this.votingInFlight.delete(id);
             this.broadcast('proposal-resolved', { id, status: 'rejected' });
             this.broadcast('chat', { sender: 'System', text: `❌ Rejected: ${p.kind} from ${p.proposedByName}` });
         });
@@ -360,6 +382,39 @@ export class OfficeRoom extends Room<OfficeState> {
             client.send('proposals-state', {
                 pending: Array.from(this.proposals.values()).filter((p) => p.status === 'pending'),
             });
+        });
+
+        // Genesis (meta-feature) requests
+        this.onMessage('request-genesis', async (client) => {
+            const stats = await this.genesis.getStats();
+            const history = await this.genesis.getRecentHistory(50);
+            client.send('genesis-state', {
+                charter: this.genesis.charter,
+                paused: this.genesis.paused,
+                proposals: stats.proposals,
+                applied: stats.applied,
+                rejected: stats.rejected,
+                history: history.map((h) => ({
+                    id: h.id, kind: h.kind, by: h.by, reason: h.reason,
+                    status: h.status, rolledBack: h.rolledBack,
+                })),
+            });
+        });
+
+        this.onMessage('set-evolution-paused', async (_client, message) => {
+            const v = !!message?.paused;
+            await this.genesis.setPaused(v);
+            this.broadcast('chat', { sender: 'System', text: v ? '⏸ Evolution paused' : '▶ Evolution resumed' });
+        });
+
+        this.onMessage('rollback-proposal', async (_client, message) => {
+            const id = String(message?.id || '');
+            const entry = await this.genesis.getEntry(id);
+            if (!entry || entry.status !== 'applied' || entry.rolledBack) return;
+            this.rollbackEntry(entry);
+            await this.genesis.markRolledBack(id);
+            this.broadcast('genesis-rollback', { id });
+            this.broadcast('chat', { sender: 'System', text: `↩ Rolled back ${entry.kind} from ${entry.by}` });
         });
 
         // Save office layout from editor
@@ -425,6 +480,33 @@ export class OfficeRoom extends Room<OfficeState> {
                         console.log(`[${coreAgent.config.name}] 💭 ${decision.thought} → ${decision.action}`);
                     }
 
+                    // Detect a vote response — the System voting prompt asks
+                    // each agent to start with YES or NO. If we see one and
+                    // there's a pending proposal in voting, record it.
+                    if (decision.message) {
+                        const m = decision.message.trim();
+                        const voteMatch = m.match(/^(YES|NO)\b[:.\-—\s]*(.*)$/i);
+                        if (voteMatch && this.votingInFlight.size > 0) {
+                            const vote = voteMatch[1].toUpperCase() === 'YES' ? 'yes' : 'no';
+                            const reason = voteMatch[2].slice(0, 200);
+                            // Apply this vote to the most recent in-flight proposal
+                            const proposalId = Array.from(this.votingInFlight).pop()!;
+                            await this.genesis.addVote({
+                                proposalId, by: coreAgent.config.name, vote, reason,
+                                at: new Date().toISOString(),
+                            });
+                            this.broadcast('genesis-vote', {
+                                proposalId, by: coreAgent.config.name, vote, reason,
+                            });
+                            this.broadcast('chat', {
+                                sender: '🗳️ ' + coreAgent.config.name,
+                                text: `${vote.toUpperCase()} — ${reason.slice(0, 80)}`,
+                            });
+                            this.thinkingLocks.set(id, false);
+                            return;
+                        }
+                    }
+
                     // ─── HANDLE TALK ACTION (Agent-to-Agent) ───
                     if (decision.action === 'talk' && decision.message) {
                         const targetName = decision.target || '';
@@ -476,7 +558,9 @@ export class OfficeRoom extends Room<OfficeState> {
                         if (decision.toolCall.name === 'propose_office_change') {
                             const params = decision.toolCall.params || {};
                             const kind = String(params.kind || '');
-                            if (['add_furniture', 'move_furniture', 'expand_grid', 'add_placard'].includes(kind)) {
+                            const allowed = ['add_furniture', 'move_furniture', 'expand_grid', 'add_placard'].includes(kind);
+                            const activeApplied = await this.genesis.getActiveAppliedCount();
+                            if (allowed && !this.genesis.paused && activeApplied < OfficeRoom.GENESIS_MAX_ACTIVE) {
                                 const proposal: OfficeProposal = {
                                     id: `prop_${Date.now()}_${++this.proposalCounter}`,
                                     proposedBy: id,
@@ -488,11 +572,16 @@ export class OfficeRoom extends Room<OfficeState> {
                                     status: 'pending',
                                 };
                                 this.proposals.set(proposal.id, proposal);
+                                await this.genesis.record({
+                                    id: proposal.id, kind, by: coreAgent.config.name,
+                                    reason: proposal.reason, payload: proposal.payload, status: 'pending',
+                                });
                                 this.broadcast('proposal-pending', proposal);
                                 this.broadcast('chat', {
                                     sender: '🛠️ ' + coreAgent.config.name,
                                     text: `Proposes ${proposal.kind}: ${proposal.reason.slice(0, 100)}`,
                                 });
+                                void this.spawnVoting(proposal);
                             }
                             this.thinkingLocks.set(id, false);
                             return;
@@ -991,39 +1080,35 @@ export class OfficeRoom extends Room<OfficeState> {
         console.log(client.sessionId, "left the office room!");
     }
 
-    // Apply an approved proposal. Currently a thin layer — most proposal
-    // kinds just broadcast intent so the existing layout/UI pipeline picks
-    // them up. We deliberately keep this conservative: no destructive ops,
-    // grid expansion is bounded.
+    // Apply an approved proposal. Returns a rollback-handle id so we can
+    // undo the change later via rollbackEntry. Conservative — only emits
+    // broadcast events and updates portfolioItems; no destructive ops or
+    // generated code execution.
     private applyProposal(p: OfficeProposal): void {
         const payload = p.payload as Record<string, unknown>;
         switch (p.kind) {
             case 'add_furniture': {
                 this.broadcast('layout-add', {
-                    proposedBy: p.proposedBy,
-                    type: payload.type,
-                    x: payload.x,
-                    y: payload.y,
+                    proposalId: p.id, proposedBy: p.proposedBy,
+                    type: payload.type, x: payload.x, y: payload.y,
                 });
                 break;
             }
             case 'move_furniture': {
                 this.broadcast('layout-move', {
-                    uid: payload.uid,
-                    toX: payload.toX,
-                    toY: payload.toY,
+                    proposalId: p.id, uid: payload.uid, toX: payload.toX, toY: payload.toY,
                 });
                 break;
             }
             case 'expand_grid': {
                 const dir = String(payload.direction || 'right');
                 const amount = Math.max(1, Math.min(4, Number(payload.amount || 1)));
-                this.broadcast('layout-expand', { direction: dir, amount });
+                this.broadcast('layout-expand', { proposalId: p.id, direction: dir, amount });
                 break;
             }
             case 'add_placard': {
                 const item: PortfolioItem = {
-                    id: `placard_${Date.now()}`,
+                    id: `placard_${p.id}`,
                     title: String(payload.title || 'Untitled'),
                     detail: String(payload.detail || ''),
                     source: 'resume',
@@ -1032,6 +1117,53 @@ export class OfficeRoom extends Room<OfficeState> {
                 this.broadcast('portfolio-state', { items: this.portfolioItems });
                 break;
             }
+        }
+        // Persist to history. We only track applied changes here; pending
+        // ones were recorded earlier in the propose flow.
+        void this.genesis.markApplied(p.id);
+    }
+
+    // Undo an applied proposal. Mirror of applyProposal — emit a "rollback"
+    // event that the UI uses to reverse the visual change. Placards are
+    // removed in-process; layout mutations are a UI concern (the canvas
+    // currently doesn't render layout-add live, so the rollback is a no-op
+    // until M5 adds that pipeline).
+    private rollbackEntry(entry: { id: string; kind: string; payloadJson: string }): void {
+        let payload: Record<string, unknown> = {};
+        try { payload = JSON.parse(entry.payloadJson || '{}'); } catch { /* ignore */ }
+        switch (entry.kind) {
+            case 'add_placard': {
+                const placardId = `placard_${entry.id}`;
+                this.portfolioItems = this.portfolioItems.filter((i) => i.id !== placardId);
+                this.broadcast('portfolio-state', { items: this.portfolioItems });
+                break;
+            }
+            case 'add_furniture':
+            case 'move_furniture':
+            case 'expand_grid': {
+                this.broadcast('layout-rollback', { proposalId: entry.id, kind: entry.kind, payload });
+                break;
+            }
+        }
+    }
+
+    // Spawn a voting cycle for a pending proposal. Each other agent gets
+    // an inbox message asking for a yes/no. Their next think cycle produces
+    // it; we observe the response in the chat handler. For MVP this is
+    // best-effort — no quorum enforcement; the user is still the gate.
+    private async spawnVoting(proposal: OfficeProposal): Promise<void> {
+        if (this.genesis.paused) return;
+        if (this.votingInFlight.has(proposal.id)) return;
+        this.votingInFlight.add(proposal.id);
+        const prompt = `[VOTE] ${proposal.proposedByName} proposes ${proposal.kind}: "${proposal.reason}". Reply with one short sentence — start with YES or NO followed by your reason. This is a vote, not a normal action.`;
+        for (const [id, agent] of this.coreAgents) {
+            if (id === proposal.proposedBy) continue;
+            agent.receiveMessage({
+                from: 'System',
+                to: id,
+                content: prompt,
+                timestamp: new Date().toISOString(),
+            });
         }
     }
 

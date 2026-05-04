@@ -125,11 +125,81 @@ canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;
   text-transform:uppercase;border-radius:2px;width:100%;transition:background .15s}
 #evo:hover{background:#2a0066;color:#cc99ff}
 #evo:disabled{opacity:.4;cursor:wait}
+
+/* Floating panels (ported from root prototype as vanilla JS) */
+.fp{position:absolute;background:#0a0a18ee;border:2px solid #1a1a3a;border-radius:3px;
+  font-family:'Courier New',monospace;color:#bbb;
+  box-shadow:0 4px 16px rgba(0,0,0,.6);overflow:hidden;
+  display:flex;flex-direction:column;backdrop-filter:blur(2px)}
+.fp-head{display:flex;justify-content:space-between;align-items:center;
+  padding:5px 8px;background:#04040c;border-bottom:1px solid var(--accent,#e94560);
+  cursor:move;user-select:none}
+.fp-title{display:flex;gap:6px;align-items:center;font-size:9px;letter-spacing:1.5px;
+  color:var(--accent,#e94560);text-transform:uppercase}
+.fp-icon{font-size:11px}
+.fp-actions{display:flex;gap:3px}
+.fp-btn{background:transparent;border:1px solid #2a2a4a;color:#888;width:18px;height:18px;
+  cursor:pointer;font-family:'Courier New',monospace;font-size:11px;line-height:1;
+  display:flex;align-items:center;justify-content:center;padding:0;border-radius:2px}
+.fp-btn:hover{border-color:var(--accent,#e94560);color:var(--accent,#e94560)}
+.fp-body{flex:1;overflow-y:auto;padding:8px 10px;font-size:10px;line-height:1.5;
+  scrollbar-width:thin;scrollbar-color:#1a1a3a transparent;max-height:65vh}
+.fp-body::-webkit-scrollbar{width:4px}
+.fp-body.min{display:none}
+
+/* Toolbar (panel chips) */
+#tb{position:absolute;top:8px;left:8px;display:flex;gap:4px;z-index:50;
+  font-family:'Courier New',monospace}
+.chip{background:#0a0a18cc;border:1px solid #1a1a3a;color:#666;padding:5px 9px;
+  font-size:9px;letter-spacing:1.5px;text-transform:uppercase;cursor:pointer;
+  border-radius:2px;transition:color .15s,border-color .15s}
+.chip:hover{color:#aaa;border-color:#3a3a5a}
+.chip.on{color:var(--c,#e94560);border-color:var(--c,#e94560);
+  box-shadow:0 0 8px rgba(233,69,96,.3)}
+
+/* Genesis panel — meta evolution feature */
+.gen-section{border-bottom:1px solid #1a1a3a;padding:0 0 8px;margin:0 0 8px}
+.gen-section:last-child{border:none}
+.gen-h{font-size:9px;color:#aa88ff;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:4px}
+.gen-charter{background:#06060f;border-left:2px solid #aa88ff;padding:6px 8px;
+  font-size:10px;color:#9999bb;font-style:italic;line-height:1.5;margin-bottom:6px}
+.gen-pause{display:flex;align-items:center;gap:6px;font-size:10px;color:#888;cursor:pointer;margin-top:4px}
+.gen-pause input{margin:0;cursor:pointer}
+.gen-stat{display:flex;justify-content:space-between;font-size:9px;color:#666;
+  padding:3px 0;border-bottom:1px dashed #1a1a3a}
+.gen-stat:last-child{border:none}
+.gen-stat b{color:#aaa;font-weight:normal}
+.gen-vote{margin:4px 0;font-size:9px;color:#666;line-height:1.4}
+.gen-vote .by{color:#aaa}
+.gen-vote .yea{color:#7ee787}
+.gen-vote .nay{color:#ff8888}
+.gen-hist{font-size:9px;color:#666;padding:3px 0;border-bottom:1px dashed #1a1a3a;
+  display:flex;justify-content:space-between;gap:8px;align-items:start}
+.gen-hist .h-t{color:#aaa;flex:1;line-height:1.4;word-break:break-word}
+.gen-hist .h-r{background:#4d1a1a;color:#ff8888;border:none;cursor:pointer;
+  font-size:8px;padding:2px 5px;font-family:'Courier New',monospace;border-radius:2px}
+.gen-hist .h-r:hover{background:#6a2424}
+.gen-hist .h-r.done{background:#1a4d2e;color:#7ee787;cursor:default}
+
+/* Agent inspector panel */
+.ai-name{font-size:14px;color:var(--c,#e94560);font-weight:bold;letter-spacing:1px;margin-bottom:4px}
+.ai-role{font-size:9px;color:#888;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:8px}
+.ai-row{font-size:9px;color:#666;display:flex;justify-content:space-between;padding:2px 0}
+.ai-row b{color:#aaa;font-weight:normal}
+.ai-section{margin-top:8px;padding-top:6px;border-top:1px dashed #1a1a3a}
+.ai-list{font-size:9px;color:#888;line-height:1.5;max-height:140px;overflow-y:auto}
+.ai-list li{margin-left:12px;padding:1px 0}
 </style>
 </head>
 <body>
 <div id="app">
-  <div id="cv-col"><canvas id="c"></canvas></div>
+  <div id="cv-col">
+    <canvas id="c"></canvas>
+    <div id="tb">
+      <div class="chip" data-pn="inspector" style="--c:#4fc3f7">🔍 Inspector</div>
+      <div class="chip" data-pn="genesis" style="--c:#aa88ff">🧬 Genesis</div>
+    </div>
+  </div>
   <div id="sidebar">
     <div id="hdr">
       <div id="hdr-title">⚡ Johns Command Center</div>
@@ -515,6 +585,8 @@ canvas.addEventListener('click', (e) => {
     addFeed(a.name, '👋 waves at you', a.color);
     // Highlight sidebar card
     document.querySelectorAll('.ac').forEach(el => el.classList.toggle('focus', el.id === 'card-' + best));
+    // Open inspector panel for this agent
+    window.dispatchEvent(new CustomEvent('agent-click', { detail: { id: best } }));
   } else {
     focusedAgentId = null;
     document.querySelectorAll('.ac').forEach(el => el.classList.remove('focus'));
@@ -1231,6 +1303,44 @@ function connect() {
     });
     r.onMessage('discovery', (m) => {
       addFeed('💡 ' + m.agentName, m.note, '#aa88ff');
+      const id = m.agentId;
+      agentDiscoveries[id] = (agentDiscoveries[id] || []).concat(m.note).slice(-12);
+      if (inspectedId === id) showInspector(id); // refresh
+    });
+
+    // Genesis (meta-feature) state
+    r.onMessage('proposal-pending', () => { genesisState.proposals++; renderGenesis(); });
+    r.onMessage('proposal-resolved', (m) => {
+      if (m.status === 'approved') genesisState.applied++;
+      else if (m.status === 'rejected') genesisState.rejected++;
+      renderGenesis();
+    });
+    r.onMessage('genesis-state', (m) => {
+      if (typeof m.charter === 'string') genesisState.charter = m.charter;
+      if (typeof m.paused === 'boolean') genesisState.paused = m.paused;
+      if (Array.isArray(m.history)) genesisState.history = m.history;
+      if (typeof m.applied === 'number') genesisState.applied = m.applied;
+      if (typeof m.rejected === 'number') genesisState.rejected = m.rejected;
+      if (typeof m.proposals === 'number') genesisState.proposals = m.proposals;
+      renderGenesis();
+    });
+    r.onMessage('genesis-history', (m) => {
+      genesisState.history = m.history || [];
+      renderGenesis();
+    });
+    r.onMessage('genesis-vote', (m) => {
+      const arr = genesisState.votes.get(m.proposalId) || [];
+      arr.push({ by: m.by, vote: m.vote, reason: m.reason });
+      genesisState.votes.set(m.proposalId, arr);
+      renderGenesis();
+    });
+    r.onMessage('genesis-charter', (m) => {
+      genesisState.charter = m.charter;
+      renderGenesis();
+    });
+    r.onMessage('genesis-rollback', (m) => {
+      const h = genesisState.history.find((x) => x.id === m.id);
+      if (h) { h.rolledBack = true; renderGenesis(); }
     });
     // Layout-change broadcasts. office.html generates its own layout
     // client-side, so we just surface them as feed entries for now.
@@ -1241,6 +1351,7 @@ function connect() {
     // Bootstrap state on connect
     r.send('request-portfolio');
     r.send('request-proposals');
+    r.send('request-genesis');
 
     r.onLeave(() => {
       document.getElementById('cdot').className = '';
@@ -1344,6 +1455,199 @@ function render(ts) {
 
   requestAnimationFrame(render);
 }
+
+// ── Floating panel framework (vanilla port of root prototype) ────────────────
+const _panels = new Map();
+
+function createFloatingPanel({ id, title, icon, accent, defaultX, defaultY, width = 280, hidden = true }) {
+  const root = document.getElementById('app');
+  const el = document.createElement('div');
+  el.className = 'fp';
+  el.style.setProperty('--accent', accent || '#e94560');
+  el.style.width = width + 'px';
+  el.style.zIndex = String(50 + _panels.size);
+
+  // Restore position from localStorage
+  const sk = 'panel:' + id;
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem(sk) || '{}'); } catch (e) {}
+  el.style.left = (saved.x ?? defaultX ?? Math.max(8, window.innerWidth - width - 24)) + 'px';
+  el.style.top = (saved.y ?? defaultY ?? 50) + 'px';
+  if (saved.hidden === false) hidden = false;
+  el.style.display = hidden ? 'none' : 'flex';
+
+  el.innerHTML = `
+    <div class="fp-head">
+      <div class="fp-title"><span class="fp-icon">${icon || ''}</span><span>${escapeHtml(title)}</span></div>
+      <div class="fp-actions">
+        <button class="fp-btn" data-act="min" title="Collapse">–</button>
+        <button class="fp-btn" data-act="x" title="Close">×</button>
+      </div>
+    </div>
+    <div class="fp-body" data-body></div>
+  `;
+  root.appendChild(el);
+
+  // Drag (head only, ignoring buttons)
+  let drag = null;
+  const head = el.querySelector('.fp-head');
+  head.addEventListener('mousedown', (e) => {
+    if (e.target.closest('button')) return;
+    drag = { dx: e.clientX - el.offsetLeft, dy: e.clientY - el.offsetTop };
+    el.style.zIndex = String(100 + _panels.size);
+  });
+  window.addEventListener('mousemove', (e) => {
+    if (!drag) return;
+    const x = Math.max(8, Math.min(window.innerWidth - width - 8, e.clientX - drag.dx));
+    const y = Math.max(8, Math.min(window.innerHeight - 44, e.clientY - drag.dy));
+    el.style.left = x + 'px';
+    el.style.top = y + 'px';
+  });
+  window.addEventListener('mouseup', () => {
+    if (!drag) return;
+    drag = null;
+    persist();
+  });
+
+  // Buttons
+  let isMin = false;
+  el.querySelector('[data-act="min"]').addEventListener('click', () => {
+    isMin = !isMin;
+    el.querySelector('[data-body]').classList.toggle('min', isMin);
+    el.querySelector('[data-act="min"]').textContent = isMin ? '+' : '–';
+  });
+  el.querySelector('[data-act="x"]').addEventListener('click', () => api.hide());
+
+  function persist() {
+    localStorage.setItem(sk, JSON.stringify({ x: el.offsetLeft, y: el.offsetTop, hidden: el.style.display === 'none' }));
+  }
+
+  const api = {
+    el,
+    body: el.querySelector('[data-body]'),
+    show() { el.style.display = 'flex'; persist(); updateChip(id, true); },
+    hide() { el.style.display = 'none'; persist(); updateChip(id, false); },
+    toggle() { el.style.display === 'none' ? api.show() : api.hide(); },
+    setBody(html) { api.body.innerHTML = html; },
+  };
+  _panels.set(id, api);
+  updateChip(id, !hidden);
+  return api;
+}
+
+function updateChip(id, on) {
+  const c = document.querySelector(`.chip[data-pn="${id}"]`);
+  if (c) c.classList.toggle('on', on);
+}
+
+document.querySelectorAll('.chip').forEach((c) => {
+  c.addEventListener('click', () => {
+    const p = _panels.get(c.dataset.pn);
+    if (p) p.toggle();
+  });
+});
+
+// ── Inspector panel ──────────────────────────────────────────────────────────
+const inspector = createFloatingPanel({
+  id: 'inspector', title: 'Agent Inspector', icon: '🔍', accent: '#4fc3f7',
+  width: 280, defaultX: 24, defaultY: 50, hidden: true,
+});
+inspector.setBody('<div style="color:#444;text-align:center;padding:20px 0">Click an agent to inspect.</div>');
+
+let inspectedId = null;
+function showInspector(agentId) {
+  const def = DEFS.find((d) => d.id === agentId);
+  if (!def) return;
+  inspectedId = agentId;
+  const a = agents[agentId] || {};
+  const action = a.action || 'idle';
+  const thought = a.thought || '...';
+  const memList = (agentMemories[agentId] || []).slice(-8).map((m) => `<li>${escapeHtml(m)}</li>`).join('');
+  const discList = (agentDiscoveries[agentId] || []).slice(-6).map((d) => `<li>${escapeHtml(d)}</li>`).join('');
+  inspector.body.style.setProperty('--c', def.color);
+  inspector.setBody(`
+    <div class="ai-name" style="color:${def.color}">${escapeHtml(def.name)}</div>
+    <div class="ai-role">${escapeHtml(def.role || def.group || '')}</div>
+    <div class="ai-row"><span>action</span><b>${escapeHtml(action)}</b></div>
+    <div class="ai-row"><span>position</span><b>(${a.tx?.toFixed?.(1) || '?'}, ${a.ty?.toFixed?.(1) || '?'})</b></div>
+    <div class="ai-row"><span>thought</span><b style="font-style:italic;color:#888">${escapeHtml(thought.slice(0, 60))}</b></div>
+    <div class="ai-section">
+      <div class="gen-h" style="color:${def.color}">Recent memories</div>
+      <ul class="ai-list">${memList || '<li style="color:#444">none yet</li>'}</ul>
+    </div>
+    <div class="ai-section">
+      <div class="gen-h" style="color:#aa88ff">Discoveries</div>
+      <ul class="ai-list">${discList || '<li style="color:#444">none yet</li>'}</ul>
+    </div>
+    <div class="ai-section">
+      <button class="prop-btn ok" style="width:100%" onclick="if(room) room.send('request-evolution', { agentId: '${escapeHtml(agentId)}' })">✨ Ask this agent to propose</button>
+    </div>
+  `);
+  inspector.show();
+}
+
+const agentMemories = {};
+const agentDiscoveries = {};
+
+// ── Genesis panel (meta-feature) ─────────────────────────────────────────────
+const genesis = createFloatingPanel({
+  id: 'genesis', title: 'Genesis · Evolution Log', icon: '🧬', accent: '#aa88ff',
+  width: 320, defaultY: 50, hidden: true,
+});
+
+const genesisState = {
+  charter: 'No charter yet. Agents will draft one as they evolve the office.',
+  proposals: 0,
+  applied: 0,
+  rejected: 0,
+  paused: false,
+  history: [],   // { id, kind, by, reason, status, appliedAt, rolledBack }
+  votes: new Map(), // proposalId -> [{ by, vote, reason }]
+};
+
+function renderGenesis() {
+  const recent = genesisState.history.slice(-15).reverse();
+  const rows = recent.map((h) => `
+    <div class="gen-hist">
+      <div class="h-t"><span style="color:${h.status==='applied'?'#7ee787':h.status==='rejected'?'#ff8888':'#888'}">[${escapeHtml(h.status)}]</span>
+        <span class="by">${escapeHtml(h.by||'?')}</span> · ${escapeHtml(h.kind)} — ${escapeHtml(h.reason||'')}</div>
+      ${h.status==='applied' && !h.rolledBack
+        ? `<button class="h-r" onclick="if(room) room.send('rollback-proposal', { id: '${escapeHtml(h.id)}' })">undo</button>`
+        : h.rolledBack ? '<button class="h-r done">undone</button>' : ''}
+    </div>`).join('') || '<div style="color:#444;padding:10px 0;text-align:center">no history yet</div>';
+
+  const votesHtml = Array.from(genesisState.votes.entries()).slice(-3).map(([pid, vs]) => `
+    <div style="margin:4px 0;padding:4px 6px;background:#06060f;border-left:1px solid #aa88ff;font-size:9px">
+      <div style="color:#888;margin-bottom:2px">prop ${escapeHtml(pid.slice(-6))} — ${vs.length} vote(s)</div>
+      ${vs.map(v => `<div class="gen-vote"><span class="by">${escapeHtml(v.by)}</span>: <span class="${v.vote==='yes'?'yea':'nay'}">${v.vote}</span> — ${escapeHtml((v.reason||'').slice(0,60))}</div>`).join('')}
+    </div>`).join('');
+
+  genesis.setBody(`
+    <div class="gen-section">
+      <div class="gen-h">World Charter</div>
+      <div class="gen-charter">${escapeHtml(genesisState.charter)}</div>
+    </div>
+    <div class="gen-section">
+      <div class="gen-h">Stats</div>
+      <div class="gen-stat"><span>proposed</span><b>${genesisState.proposals}</b></div>
+      <div class="gen-stat"><span>applied</span><b style="color:#7ee787">${genesisState.applied}</b></div>
+      <div class="gen-stat"><span>rejected</span><b style="color:#ff8888">${genesisState.rejected}</b></div>
+      <div class="gen-stat"><span>history cap</span><b>50</b></div>
+      <label class="gen-pause"><input type="checkbox" ${genesisState.paused?'checked':''} onchange="if(room) room.send('set-evolution-paused', { paused: this.checked })"> Pause evolution</label>
+    </div>
+    ${votesHtml ? `<div class="gen-section"><div class="gen-h">Recent votes</div>${votesHtml}</div>` : ''}
+    <div class="gen-section">
+      <div class="gen-h">History (last 15)</div>
+      ${rows}
+    </div>
+  `);
+}
+renderGenesis();
+
+// Hook the existing agent click handler so clicking an agent opens inspector.
+// Click handling already exists earlier in the file (canvas mousedown);
+// see the addFeed('waves at you') flow — augment via a window-level event.
+window.addEventListener('agent-click', (e) => showInspector(e.detail.id));
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 buildSidebar();
