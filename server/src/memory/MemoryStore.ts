@@ -124,6 +124,22 @@ export class MemoryStore {
         }));
     }
 
+    // Returns the most recent shared (cross-agent) memories — anything saved
+    // under agent_id='shared' (typically user statements directed to the team).
+    async loadSharedRecent(limit: number = 20): Promise<MemoryEntry[]> {
+        if (!this.db) return [];
+        const rows = await this.db.all(
+            "SELECT content, type, timestamp, importance FROM memories WHERE agent_id = 'shared' ORDER BY created_at DESC LIMIT ?",
+            [limit]
+        );
+        return rows.reverse().map((r: any) => ({
+            content: r.content,
+            type: r.type,
+            timestamp: r.timestamp,
+            importance: r.importance
+        }));
+    }
+
     async semanticSearch(agentId: string, query: string, topK: number = 5): Promise<MemoryEntry[]> {
         if (!this.db) return [];
         const queryEmbedding = await this.generateEmbedding(query);

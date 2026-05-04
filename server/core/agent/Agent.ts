@@ -62,6 +62,12 @@ export class Agent {
     // Short-term memory buffer
     public memories: MemoryEntry[] = [];
 
+    // Cross-agent shared knowledge (anything the user has told the team)
+    public sharedMemories: MemoryEntry[] = [];
+
+    // Persistent facts about the user / world. Always prepended to the prompt.
+    public worldContext: string = '';
+
     // Current assigned task
     public currentTask: string = '';
 
@@ -137,11 +143,19 @@ export class Agent {
                 ? `Your recent memories:\n${perception.memories.slice(-5).join('\n')}`
                 : '';
 
+            const sharedStr = this.sharedMemories.length > 0
+                ? `Shared team knowledge (things the user has told the office):\n${this.sharedMemories.slice(-8).map(m => `- ${m.content}`).join('\n')}`
+                : '';
+
+            const worldStr = this.worldContext
+                ? `=== WHAT YOU KNOW ABOUT THE USER (always reference this) ===\n${this.worldContext.slice(0, 4000)}\n=== END USER CONTEXT ===\n`
+                : '';
+
             const taskStr = perception.currentTask
                 ? `Your assigned task: ${JSON.stringify(perception.currentTask)}`
                 : 'No task assigned yet.';
 
-            const prompt = `You are ${this.config.name}, a ${this.config.role} in a virtual office.
+            const prompt = `${worldStr}You are ${this.config.name}, a ${this.config.role} in a virtual office.
 Personality: ${this.config.personality.communicationStyle} style. Traits: ${JSON.stringify(this.config.personality.traits)}.
 System: ${this.config.inference.systemPrompt}
 Current Time: ${perception.time}
@@ -150,6 +164,7 @@ ${nearbyStr}
 ${taskStr}
 ${messageStr}
 ${memoryStr}
+${sharedStr}
 
 You must decide your next action. Reply ONLY with a JSON object:
 {

@@ -1,6 +1,8 @@
+import fs from 'fs';
+import path from 'path';
 import { Room, Client } from 'colyseus';
 import { OfficeState } from '../schema/OfficeState';
-import { Agent, Office, OfficeConfig, ConversationMessage } from '../../core';
+import { Agent, Office, OfficeConfig, ConversationMessage, MemoryEntry } from '../../core';
 import { OllamaAdapter, ClaudeAdapter } from '../../adapters';
 import { ToolExecutor } from '../tools/ToolExecutor';
 import { MemoryStore } from '../memory/MemoryStore';
@@ -70,6 +72,12 @@ export class OfficeRoom extends Room<OfficeState> {
         'hire_3-desk': { x: 25, y: 8, type: 'desk' },
         'hire_4-desk': { x: 32, y: 18, type: 'desk' },
     };
+
+    // World context (context-bible.md) — refreshed when bible changes.
+    private worldContext: string = '';
+    // Cached shared memories, refreshed periodically.
+    private sharedMemoryCache: MemoryEntry[] = [];
+    private sharedMemoryRefreshAt = 0;
 
     static getActiveRoom(): OfficeRoom | null {
         return OfficeRoom.activeRoom;
@@ -141,6 +149,20 @@ export class OfficeRoom extends Room<OfficeState> {
             const coreAgent = this.coreAgents.get(agentDef.id);
             if (coreAgent) coreAgent.config.inference.systemPrompt = agentDef.inference.systemPrompt;
         }
+
+        // Load context-bible.md and broadcast it as world-context to every agent.
+        // The bible is the source of truth for who the user is — every agent sees
+        // it on every think. Updates flow in via injectContextUpdate when the
+        // ContextSync watcher detects file changes.
+        this.loadWorldContext();
+
+        // Seed shared-memory cache from disk (anything the user has told the
+        // team in past sessions).
+        this.sharedMemoryCache = await this.memoryStore.loadSharedRecent(20);
+        for (const agent of this.coreAgents.values()) {
+            agent.sharedMemories = this.sharedMemoryCache;
+        }
+
         this.rebuildRelationshipGraph();
         const savedLayout = await this.memoryStore.loadLayout('default');
         this.currentLayout = Array.isArray(savedLayout) ? savedLayout : [];
@@ -151,9 +173,39 @@ export class OfficeRoom extends Room<OfficeState> {
             console.log(`Command from ${client.sessionId}:`, message);
         });
 
-        this.onMessage('chat', (client, message) => {
-            console.log(`Chat from ${client.sessionId}: ${message.text}`);
-            this.broadcast('chat', { sender: 'User', text: message.text });
+        this.onMessage('chat', async (client, message) => {
+            const text = String(message?.text || '').trim();
+            if (!text) return;
+            console.log(`Chat from ${client.sessionId}: ${text}`);
+
+            // Echo to the UI so the bubble shows up.
+            this.broadcast('chat', { sender: 'User', text });
+
+            // Drop into every agent's inbox so it appears as a recent message
+            // on their next think cycle. Whichever agent is addressed (or just
+            // listening) can respond.
+            const userMsg: ConversationMessage = {
+                from: 'User',
+                to: 'team',
+                content: text,
+                timestamp: new Date().toISOString(),
+            };
+            for (const agent of this.coreAgents.values()) {
+                agent.receiveMessage(userMsg);
+            }
+
+            // Persist as shared memory — survives restarts, every agent recalls.
+            const entry: MemoryEntry = {
+                content: `User said: "${text}"`,
+                type: 'conversation',
+                timestamp: userMsg.timestamp,
+                importance: 0.8,
+            };
+            this.sharedMemoryCache = [...this.sharedMemoryCache, entry].slice(-20);
+            for (const agent of this.coreAgents.values()) {
+                agent.sharedMemories = this.sharedMemoryCache;
+            }
+            await this.memoryStore.saveMemory('shared', entry, this.sessionId);
         });
 
         this.onMessage('start-scenario', (client, message) => {
@@ -771,9 +823,45 @@ export class OfficeRoom extends Room<OfficeState> {
         console.log(client.sessionId, "left the office room!");
     }
 
+    // Load context-bible.md from disk and apply it as worldContext on every
+    // agent. Falls back silently if the file is missing — the system still
+    // works, agents just won't have the persistent profile.
+    private loadWorldContext(): void {
+        const candidates = [
+            path.join(process.cwd(), '..', 'context', 'context-bible.md'),
+            path.join(process.cwd(), 'context', 'context-bible.md'),
+        ];
+        for (const p of candidates) {
+            try {
+                if (fs.existsSync(p)) {
+                    this.worldContext = fs.readFileSync(p, 'utf-8');
+                    for (const agent of this.coreAgents.values()) {
+                        agent.worldContext = this.worldContext;
+                    }
+                    console.log(`[OfficeRoom] Loaded world context from ${p} (${this.worldContext.length} chars) → applied to ${this.coreAgents.size} agents`);
+                    return;
+                }
+            } catch (err) {
+                console.warn(`[OfficeRoom] Could not read ${p}:`, err);
+            }
+        }
+        console.warn('[OfficeRoom] No context-bible.md found — agents will rely on per-agent system prompts only');
+    }
+
     // Inject context from Claude.ai conversations into agent memories
     public injectContextUpdate(update: ContextUpdate) {
         const { source, content, relevantAgents, timestamp } = update;
+
+        // Special case: the bible is the canonical user profile. Refresh
+        // worldContext on every agent so they always reference it.
+        if (source === 'context-bible.md') {
+            this.worldContext = content;
+            for (const agent of this.coreAgents.values()) {
+                agent.worldContext = content;
+            }
+            console.log(`[ContextSync] Refreshed world context for ${this.coreAgents.size} agents`);
+        }
+
         let count = 0;
         for (const agentId of relevantAgents) {
             const agent = this.coreAgents.get(agentId);
