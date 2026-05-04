@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(gh auth:*)",
-      "Bash(git --version)"
+      "Bash(git --version)",
+      "mcp__tldraw__exec"
     ]
   }
 }
