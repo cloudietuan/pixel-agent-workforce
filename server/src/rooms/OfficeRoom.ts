@@ -10,17 +10,45 @@ import { JOHNS_AGENTS } from '../johns-agents';
 import { ContextUpdate } from '../context-sync';
 import { loadPortfolio, PortfolioItem } from '../portfolio';
 import { GenesisStore } from '../genesis';
+import {
+    SandboxStore,
+    validateRuntimeObjectInput,
+    validateBehaviorInput,
+    validateWidgetInput,
+    hashSource,
+    RuntimeObject,
+    RuntimeWidget,
+    WidgetTemplate,
+} from '../sandbox';
 
 export interface OfficeProposal {
     id: string;
     proposedBy: string;
     proposedByName: string;
-    kind: 'add_furniture' | 'move_furniture' | 'expand_grid' | 'add_placard';
+    // Sandbox-A: add_runtime_object (sprite + position, no code)
+    // Sandbox-B (scaffold): add_behavior (sandboxed action; client executes)
+    // Sandbox-C (scaffold): add_widget (template + config, no code)
+    kind:
+        | 'add_furniture'
+        | 'move_furniture'
+        | 'expand_grid'
+        | 'add_placard'
+        | 'add_runtime_object'
+        | 'add_behavior'
+        | 'add_widget';
     reason: string;
     payload: Record<string, unknown>;
     createdAt: string;
     status: 'pending' | 'approved' | 'rejected';
+    // Validation errors set during propose; if non-empty, proposal is
+    // marked invalid and never reaches the user.
+    validationErrors?: string[];
 }
+
+const ALL_PROPOSAL_KINDS = [
+    'add_furniture', 'move_furniture', 'expand_grid', 'add_placard',
+    'add_runtime_object', 'add_behavior', 'add_widget',
+] as const;
 
 interface HighlightEvent {
     type: string;
@@ -101,6 +129,7 @@ export class OfficeRoom extends Room<OfficeState> {
     private portfolioItems: PortfolioItem[] = [];
     // Genesis: persistent evolution history, votes, charter, pause toggle.
     private genesis = new GenesisStore();
+    private sandbox = new SandboxStore();
     private static readonly GENESIS_MAX_ACTIVE = 50;
     // Track in-flight voting cycles to avoid double-spawn.
     private votingInFlight: Set<string> = new Set();
@@ -113,9 +142,11 @@ export class OfficeRoom extends Room<OfficeState> {
         OfficeRoom.activeRoom = this;
         this.setState(new OfficeState());
 
-        // Initialize memory store + genesis store (shares the SQLite file)
+        // Initialize memory store + genesis store + sandbox store
+        // (all share the same SQLite file at server/data/office-memory.db)
         await this.memoryStore.initialize();
         await this.genesis.initialize();
+        await this.sandbox.initialize();
 
         const config: OfficeConfig = {
             name: options.name || 'Startup HQ',
@@ -303,16 +334,32 @@ export class OfficeRoom extends Room<OfficeState> {
             }
             const agentId = String(message?.agentId || '');
             const kind = String(message?.kind || '');
-            if (!['add_furniture', 'move_furniture', 'expand_grid', 'add_placard'].includes(kind)) return;
+            if (!ALL_PROPOSAL_KINDS.includes(kind as typeof ALL_PROPOSAL_KINDS[number])) return;
             const agent = this.coreAgents.get(agentId);
             if (!agent) return;
+
+            const payload = (message?.payload && typeof message.payload === 'object')
+                ? message.payload as Record<string, unknown> : {};
+
+            // Sandbox kinds get pre-validated at the boundary. Invalid
+            // proposals are rejected immediately — they never reach the
+            // user's pending queue and don't kick off a voting cycle.
+            const v = this.validateSandboxPayload(kind, payload);
+            if (!v.ok) {
+                this.broadcast('chat', {
+                    sender: '⚠️ Sandbox',
+                    text: `Rejected ${agent.config.name}'s ${kind}: ${v.errors[0]}`,
+                });
+                return;
+            }
+
             const proposal: OfficeProposal = {
                 id: `prop_${Date.now()}_${++this.proposalCounter}`,
                 proposedBy: agentId,
                 proposedByName: agent.config.name,
                 kind: kind as OfficeProposal['kind'],
                 reason: String(message?.reason || ''),
-                payload: (message?.payload && typeof message.payload === 'object') ? message.payload : {},
+                payload,
                 createdAt: new Date().toISOString(),
                 status: 'pending',
             };
@@ -422,6 +469,18 @@ export class OfficeRoom extends Room<OfficeState> {
         this.onMessage('request-charter-history', async (client) => {
             const versions = await this.genesis.getCharterHistory(10);
             client.send('genesis-charter-history', { versions });
+        });
+
+        // Sandbox: bootstrap all active runtime mutations on join. Used by
+        // the canvas (objects), behavior runner (behaviors), and Genesis
+        // panel (widgets).
+        this.onMessage('request-runtime-state', async (client) => {
+            const [objects, behaviors, widgets] = await Promise.all([
+                this.sandbox.listActiveObjects(),
+                this.sandbox.listActiveBehaviors(),
+                this.sandbox.listActiveWidgets(),
+            ]);
+            client.send('runtime-state', { objects, behaviors, widgets });
         });
 
         this.onMessage('rollback-proposal', async (_client, message) => {
@@ -1097,6 +1156,18 @@ export class OfficeRoom extends Room<OfficeState> {
         console.log(client.sessionId, "left the office room!");
     }
 
+    // Validate sandbox payloads at the propose boundary. Layout-pipeline
+    // kinds (add_furniture etc.) are passed through unchecked since their
+    // existing pipeline tolerates loose input.
+    private validateSandboxPayload(kind: string, payload: Record<string, unknown>) {
+        switch (kind) {
+            case 'add_runtime_object': return validateRuntimeObjectInput(payload);
+            case 'add_behavior':       return validateBehaviorInput(payload);
+            case 'add_widget':         return validateWidgetInput(payload);
+            default: return { ok: true, errors: [] };
+        }
+    }
+
     // Apply an approved proposal. Returns a rollback-handle id so we can
     // undo the change later via rollbackEntry. Conservative — only emits
     // broadcast events and updates portfolioItems; no destructive ops or
@@ -1134,6 +1205,67 @@ export class OfficeRoom extends Room<OfficeState> {
                 this.broadcast('portfolio-state', { items: this.portfolioItems });
                 break;
             }
+            // Sandbox-A: persist the validated runtime object + broadcast
+            // so the canvas can draw it. Validation already passed at
+            // propose-boundary.
+            case 'add_runtime_object': {
+                const obj: RuntimeObject = {
+                    id: p.id,
+                    name: String(payload.name),
+                    spriteHex: payload.spriteHex as string[][],
+                    width: 1, height: 1,
+                    x: Number(payload.x), y: Number(payload.y),
+                    addedBy: p.proposedByName,
+                    proposalId: p.id,
+                    createdAt: new Date().toISOString(),
+                    rolledBack: false,
+                };
+                void this.sandbox.addObject(obj).then(() => {
+                    this.broadcast('runtime-object-added', obj);
+                });
+                break;
+            }
+            // Sandbox-B (scaffold): persist source + broadcast so client
+            // can spawn a Web Worker that registers it. Server NEVER
+            // executes the source.
+            case 'add_behavior': {
+                const source = String(payload.source);
+                void this.sandbox.addBehavior({
+                    id: p.id,
+                    name: String(payload.name),
+                    trigger: payload.trigger as 'on_meet' | 'on_idle' | 'on_walk' | 'on_break',
+                    source,
+                    sourceHash: hashSource(source),
+                    addedBy: p.proposedByName,
+                    proposalId: p.id,
+                }).then(() => {
+                    this.broadcast('runtime-behavior-added', {
+                        id: p.id,
+                        name: payload.name,
+                        trigger: payload.trigger,
+                        source,
+                        addedBy: p.proposedByName,
+                    });
+                });
+                break;
+            }
+            // Sandbox-C: persist template+config; client renders pre-built
+            // widget. No code generation.
+            case 'add_widget': {
+                const widget: RuntimeWidget = {
+                    id: p.id,
+                    template: payload.template as WidgetTemplate,
+                    config: (payload.config as Record<string, unknown>) || {},
+                    addedBy: p.proposedByName,
+                    proposalId: p.id,
+                    createdAt: new Date().toISOString(),
+                    rolledBack: false,
+                };
+                void this.sandbox.addWidget(widget).then(() => {
+                    this.broadcast('runtime-widget-added', widget);
+                });
+                break;
+            }
         }
         // Persist to history. We only track applied changes here; pending
         // ones were recorded earlier in the propose flow.
@@ -1159,6 +1291,24 @@ export class OfficeRoom extends Room<OfficeState> {
             case 'move_furniture':
             case 'expand_grid': {
                 this.broadcast('layout-rollback', { proposalId: entry.id, kind: entry.kind, payload });
+                break;
+            }
+            case 'add_runtime_object': {
+                void this.sandbox.rollbackObject(entry.id).then(() => {
+                    this.broadcast('runtime-object-removed', { id: entry.id });
+                });
+                break;
+            }
+            case 'add_behavior': {
+                void this.sandbox.rollbackBehavior(entry.id).then(() => {
+                    this.broadcast('runtime-behavior-removed', { id: entry.id });
+                });
+                break;
+            }
+            case 'add_widget': {
+                void this.sandbox.rollbackWidget(entry.id).then(() => {
+                    this.broadcast('runtime-widget-removed', { id: entry.id });
+                });
                 break;
             }
         }

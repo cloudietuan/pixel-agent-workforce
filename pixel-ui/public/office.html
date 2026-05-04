@@ -195,6 +195,23 @@ canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;
 .gen-hist .h-r:hover{background:#6a2424}
 .gen-hist .h-r.done{background:#1a4d2e;color:#7ee787;cursor:default}
 
+/* Runtime objects (Sandbox-A) — sprite thumbnails in Genesis panel */
+.ro-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(80px,1fr));gap:6px;margin-top:4px}
+.ro-card{background:#06060f;border:1px solid #1a1a3a;padding:5px;text-align:center;border-radius:2px}
+.ro-thumb{display:block;margin:0 auto 4px;image-rendering:pixelated;border:1px solid #0a0a18}
+.ro-name{font-size:8px;color:#8ac6ff;letter-spacing:.5px;word-break:break-all;line-height:1.2}
+.ro-by{font-size:7px;color:#444;margin-top:2px}
+
+/* Runtime widgets (Sandbox-C) */
+.rw{background:#06060f;border:1px solid #1a1a3a;border-left:2px solid #ffcc00;
+  padding:6px 8px;margin:4px 0;border-radius:2px}
+.rw-tpl{font-size:8px;color:#666;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:3px}
+.rw-label{font-size:11px;color:#aaa;font-weight:bold}
+.rw-val{font-size:18px;color:#ffcc00;letter-spacing:1px;margin-top:2px}
+.rw-bar{height:6px;background:#0a0a18;margin-top:4px;border:1px solid #1a1a3a}
+.rw-bar-fill{height:100%;background:#ffcc00}
+.rw-text{font-size:10px;color:#888;line-height:1.5}
+
 /* Agent inspector panel */
 .ai-name{font-size:14px;color:var(--c,#e94560);font-weight:bold;letter-spacing:1px;margin-bottom:4px}
 .ai-role{font-size:9px;color:#888;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:8px}
@@ -1367,6 +1384,46 @@ function connect() {
       const h = genesisState.history.find((x) => x.id === m.id);
       if (h) { h.rolledBack = true; renderGenesis(); }
     });
+
+    // Sandbox runtime state — initial bootstrap + incremental events
+    r.onMessage('runtime-state', (m) => {
+      runtimeObjects.clear(); _spriteCache.clear();
+      (m.objects || []).forEach((o) => runtimeObjects.set(o.id, o));
+      runtimeWidgets.clear();
+      (m.widgets || []).forEach((w) => runtimeWidgets.set(w.id, w));
+      runtimeBehaviors.clear();
+      (m.behaviors || []).forEach((b) => runtimeBehaviors.set(b.id, b));
+      renderGenesis();
+    });
+    r.onMessage('runtime-object-added', (o) => {
+      runtimeObjects.set(o.id, o);
+      addFeed('🧬 Sandbox', `+ object "${o.name}" by ${o.addedBy} @ (${o.x},${o.y})`, '#aa88ff');
+      renderGenesis();
+    });
+    r.onMessage('runtime-object-removed', (m) => {
+      runtimeObjects.delete(m.id);
+      _spriteCache.delete(m.id);
+      addFeed('🧬 Sandbox', `- object ${m.id.slice(-6)} rolled back`, '#aa88ff');
+      renderGenesis();
+    });
+    r.onMessage('runtime-widget-added', (w) => {
+      runtimeWidgets.set(w.id, w);
+      addFeed('🧬 Sandbox', `+ widget "${w.template}" by ${w.addedBy}`, '#aa88ff');
+      renderGenesis();
+    });
+    r.onMessage('runtime-widget-removed', (m) => {
+      runtimeWidgets.delete(m.id);
+      renderGenesis();
+    });
+    r.onMessage('runtime-behavior-added', (b) => {
+      runtimeBehaviors.set(b.id, b);
+      addFeed('🧬 Sandbox', `+ behavior "${b.name}" by ${b.addedBy} (UI executes in worker)`, '#aa88ff');
+      renderGenesis();
+    });
+    r.onMessage('runtime-behavior-removed', (m) => {
+      runtimeBehaviors.delete(m.id);
+      renderGenesis();
+    });
     // Layout-change broadcasts. office.html generates its own layout
     // client-side, so we just surface them as feed entries for now.
     r.onMessage('layout-add', (m) => addFeed('Office', `+ ${m.type} @ (${m.x},${m.y})`, '#00ff88'));
@@ -1378,6 +1435,7 @@ function connect() {
     r.send('request-proposals');
     r.send('request-genesis');
     r.send('request-charter-history');
+    r.send('request-runtime-state');
 
     r.onLeave(() => {
       document.getElementById('cdot').className = '';
@@ -1393,7 +1451,7 @@ const DEBUG = new URLSearchParams(window.location.search).get('debug') === '1';
 let dbgFps = 0, dbgFrames = 0, dbgAcc = 0;
 
 const BOOT_TS = Date.now();
-const BUILD = 'v11-charter-evolution';
+const BUILD = 'v12-sandbox-objects';
 function render(ts) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -1426,6 +1484,7 @@ function render(ts) {
   drawFloor();
   drawWalls();
   drawFurniture(pcTick);
+  drawRuntimeObjects();
   drawAgents(ts);
   // Draw dust particles above furniture, below overlays
   const pdt = Math.min((ts - (render._lastTs || ts)) / 1000, 0.1);
@@ -1615,6 +1674,48 @@ function showInspector(agentId) {
 const agentMemories = {};
 const agentDiscoveries = {};
 
+// ── Sandbox runtime state (objects, behaviors, widgets) ──────────────────────
+const runtimeObjects = new Map();   // id → { id, name, spriteHex, x, y, addedBy }
+const runtimeWidgets = new Map();   // id → { id, template, config, addedBy }
+const runtimeBehaviors = new Map(); // id → { id, name, trigger, source } (scaffold)
+const _spriteCache = new Map();     // id → offscreen canvas
+
+// Render a 16x16 hex grid into an offscreen canvas (cached).
+function spriteToCanvas(id, spriteHex) {
+  if (_spriteCache.has(id)) return _spriteCache.get(id);
+  const cv = document.createElement('canvas');
+  cv.width = 16; cv.height = 16;
+  const cx = cv.getContext('2d');
+  for (let r = 0; r < 16; r++) {
+    const row = spriteHex[r];
+    if (!row) continue;
+    for (let c = 0; c < 16; c++) {
+      const hex = row[c];
+      if (!hex) continue;
+      cx.fillStyle = hex;
+      cx.fillRect(c, r, 1, 1);
+    }
+  }
+  _spriteCache.set(id, cv);
+  return cv;
+}
+
+// Draw runtime objects on the office canvas, between furniture and agents.
+function drawRuntimeObjects() {
+  for (const o of runtimeObjects.values()) {
+    const sx = o.x * S - camX;
+    const sy = o.y * S - camY;
+    if (sx < -S || sx > canvas.width || sy < -S || sy > canvas.height) continue;
+    const sprite = spriteToCanvas(o.id, o.spriteHex);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(sprite, 0, 0, 16, 16, sx, sy, S, S);
+    // Subtle outline so user can tell it's agent-built
+    ctx.strokeStyle = 'rgba(170,136,255,0.3)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(sx + 0.5, sy + 0.5, S - 1, S - 1);
+  }
+}
+
 // ── Genesis panel (meta-feature) ─────────────────────────────────────────────
 const genesis = createFloatingPanel({
   id: 'genesis', title: 'Genesis · Evolution Log', icon: '🧬', accent: '#aa88ff',
@@ -1658,6 +1759,51 @@ function renderGenesis() {
       <div style="color:#888;margin-top:2px;line-height:1.4">${escapeHtml((v.text||'').slice(0, 140))}</div>
     </div>`).join('');
 
+  // Runtime sandbox sections
+  const objectsHtml = Array.from(runtimeObjects.values()).map((o) => {
+    // Render sprite as a 32x32 data URL thumbnail
+    const cv = document.createElement('canvas');
+    cv.width = 16; cv.height = 16;
+    const cx = cv.getContext('2d');
+    for (let r = 0; r < 16; r++) for (let c = 0; c < 16; c++) {
+      const hex = (o.spriteHex[r] || [])[c]; if (!hex) continue;
+      cx.fillStyle = hex; cx.fillRect(c, r, 1, 1);
+    }
+    const dataUrl = cv.toDataURL();
+    return `<div class="ro-card">
+      <img class="ro-thumb" src="${dataUrl}" width="48" height="48" alt="">
+      <div class="ro-name">${escapeHtml(o.name)}</div>
+      <div class="ro-by">${escapeHtml(o.addedBy)} (${o.x},${o.y})</div>
+    </div>`;
+  }).join('');
+
+  const widgetsHtml = Array.from(runtimeWidgets.values()).map((w) => {
+    const cfg = w.config || {};
+    let body = '';
+    if (w.template === 'metric_card') {
+      body = `<div class="rw-label">${escapeHtml(String(cfg.label || '?'))}</div>
+              <div class="rw-val">--</div>
+              <div class="ro-by">source: ${escapeHtml(String(cfg.valueSource || ''))}</div>`;
+    } else if (w.template === 'bar_chart') {
+      const max = Number(cfg.maxValue || 100);
+      const pct = Math.min(100, (50 / max) * 100);
+      body = `<div class="rw-label">${escapeHtml(String(cfg.label || '?'))}</div>
+              <div class="rw-bar"><div class="rw-bar-fill" style="width:${pct}%"></div></div>`;
+    } else if (w.template === 'text_block') {
+      body = `<div class="rw-text">${escapeHtml(String(cfg.text || '').slice(0, 200))}</div>`;
+    } else if (w.template === 'agent_list') {
+      body = `<div class="rw-text">filter: ${escapeHtml(String(cfg.filter || 'all'))}</div>`;
+    }
+    return `<div class="rw"><div class="rw-tpl">${escapeHtml(w.template)} · ${escapeHtml(w.addedBy)}</div>${body}</div>`;
+  }).join('');
+
+  const behaviorsHtml = Array.from(runtimeBehaviors.values()).map((b) =>
+    `<div style="font-size:9px;color:#888;padding:3px 0">
+      <span style="color:#cc99ff">${escapeHtml(b.name)}</span>
+      <span style="color:#666"> · ${escapeHtml(b.trigger)} · by ${escapeHtml(b.addedBy)}</span>
+      <div style="color:#444;font-family:'Courier New';font-size:8px;margin-top:2px;background:#04040c;padding:3px 5px;max-height:40px;overflow:hidden">${escapeHtml((b.source || '').slice(0, 200))}</div>
+    </div>`).join('');
+
   genesis.setBody(`
     <div class="gen-section">
       <div class="gen-h">World Charter ${genesisState.charterVersion ? `· v${genesisState.charterVersion}` : ''}</div>
@@ -1677,6 +1823,9 @@ function renderGenesis() {
       <div class="gen-stat"><span>history cap</span><b>50</b></div>
       <label class="gen-pause"><input type="checkbox" ${genesisState.paused?'checked':''} onchange="if(room) room.send('set-evolution-paused', { paused: this.checked })"> Pause evolution</label>
     </div>
+    ${objectsHtml ? `<div class="gen-section"><div class="gen-h">Runtime objects (${runtimeObjects.size})</div><div class="ro-list">${objectsHtml}</div></div>` : ''}
+    ${widgetsHtml ? `<div class="gen-section"><div class="gen-h">Runtime widgets (${runtimeWidgets.size})</div>${widgetsHtml}</div>` : ''}
+    ${behaviorsHtml ? `<div class="gen-section"><div class="gen-h">Runtime behaviors (${runtimeBehaviors.size}) · client-side worker</div>${behaviorsHtml}</div>` : ''}
     ${votesHtml ? `<div class="gen-section"><div class="gen-h">Recent votes</div>${votesHtml}</div>` : ''}
     <div class="gen-section">
       <div class="gen-h">History (last 15)</div>
