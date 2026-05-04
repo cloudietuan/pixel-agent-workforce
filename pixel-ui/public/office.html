@@ -2,6 +2,9 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>Johns Command Center</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
@@ -22,24 +25,38 @@ canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;
 #cdot{width:7px;height:7px;border-radius:50%;background:#1a1a1a;transition:all .4s;flex-shrink:0}
 #cdot.on{background:#00ff88;box-shadow:0 0 8px #00ff88}
 #ctxt{font-size:10px;color:#333;letter-spacing:1px}
-#alist{flex:1;overflow-y:auto;padding:5px;scrollbar-width:thin;scrollbar-color:#1a0a3a transparent}
+#alist{flex:1;overflow-y:auto;padding:6px 5px 8px;scrollbar-width:thin;scrollbar-color:#1a0a3a transparent}
 #alist::-webkit-scrollbar{width:3px}
 #alist::-webkit-scrollbar-thumb{background:#1a0a3a}
+.grp{font-size:8px;color:#666;letter-spacing:2.5px;padding:8px 7px 4px;text-transform:uppercase;
+  border-bottom:1px solid #13132a;margin:4px 2px 4px;display:flex;align-items:center;gap:6px}
+.grp:first-child{margin-top:0}
+.grp::before{content:'';width:4px;height:4px;background:var(--c,#e94560);flex-shrink:0;
+  box-shadow:0 0 6px var(--c,#e94560)}
+.grp-c{color:#444;font-size:8px;margin-left:auto;letter-spacing:1px}
 .ac{background:#06060f;border:1px solid #0f0f2a;border-radius:3px;
-  margin-bottom:4px;padding:7px 9px;position:relative;overflow:hidden;transition:border-color .15s}
+  margin:0 2px 4px;padding:7px 9px 7px 12px;position:relative;overflow:hidden;
+  transition:border-color .15s,background .15s}
 .ac::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;
-  background:var(--c,#444);transition:opacity .2s;opacity:.4}
-.ac.on{border-color:var(--c,#444)}
+  background:var(--c,#444);transition:opacity .2s;opacity:.35}
+.ac.on{border-color:var(--c,#444);background:#0a0a18}
 .ac.on::before{opacity:1}
-.an{font-size:10px;font-weight:bold;color:var(--c,#aaa);letter-spacing:.5px}
-.at{font-size:9px;color:#3a3a5a;margin-top:2px;line-height:1.35;
-  max-height:26px;overflow:hidden}
-.as{display:flex;align-items:center;gap:4px;margin-top:3px}
+.an{font-size:10px;font-weight:bold;color:var(--c,#aaa);letter-spacing:.5px;
+  display:flex;align-items:center;gap:5px}
+.an-e{font-size:11px}
+.at{font-size:9px;color:#4a4a6a;margin-top:3px;line-height:1.4;
+  max-height:26px;overflow:hidden;font-style:italic}
+.ac.on .at{color:#7a7a9a}
+.as{display:flex;align-items:center;gap:5px;margin-top:4px}
 .ad{width:5px;height:5px;border-radius:50%;background:#111;flex-shrink:0;transition:all .3s}
 .ad.work{background:#ffcc00;box-shadow:0 0 4px #ffcc00}
 .ad.talk{background:#00ff88;box-shadow:0 0 4px #00ff88}
 .ad.use_tool{background:#4fc3f7;box-shadow:0 0 4px #4fc3f7}
-.aa{font-size:8px;color:#222;letter-spacing:1px;text-transform:uppercase}
+.aa{font-size:8px;color:#333;letter-spacing:1.2px;text-transform:uppercase}
+.ac.on .aa{color:var(--c,#888)}
+.ac.focus{outline:1px solid var(--c,#e94560);outline-offset:-1px;
+  box-shadow:0 0 10px rgba(233,69,96,.25) inset}
+.ac{cursor:pointer}
 #feed{height:155px;border-top:1px solid #0f0f2a;display:flex;flex-direction:column;flex-shrink:0}
 #fhdr{padding:5px 10px;font-size:9px;color:#222;background:#04040c;
   letter-spacing:2px;text-transform:uppercase;border-bottom:1px solid #0a0a18}
@@ -69,11 +86,7 @@ canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;
     <div id="sbar"><span><span id="active">0</span> active</span><span id="tk">⏱ 0</span></div>
   </div>
 </div>
-<script src="https://cdn.jsdelivr.net/npm/colyseus.js@0.15.19/dist/colyseus.js"></script>
-<script type="module">
-// ── Per-agent behavior modules (one file per agent) ───────────────────────────
-import { BEHAVIORS, bDefault } from './agents/index.js';
-
+<script>
 // ── Constants (matching pixel-agents exactly) ─────────────────────────────────
 const TILE = 16;          // world tile size in pixels
 const ZOOM = 3;           // render scale (3x = 48px tiles)
@@ -89,32 +102,42 @@ const DIR_UP    = 1;
 const DIR_RIGHT = 2;
 // Left = flip of right row
 
-const COLS = 48, ROWS = 20;
-// The world is two rooms:
-//   Office Room:  cols 0-23  (main workspace, 12 agent desks)
-//   Lounge Room:  cols 24-47 (new — recreation, lounge, kitchen, gym area)
-// Divider wall at col 24 with a doorway at rows 9-10
-const ROOM_DIVIDE_COL = 24;
-const DOOR_ROW_TOP = 9;
-const DOOR_ROW_BOT = 10;
-const WS = 'ws://localhost:3000';
+const COLS = 24, ROWS = 20;
 
-// 12 agents — col/row is their desk tile
+// WebSocket URL — auto-detects host so the office can be opened from any
+// device on your LAN (phone, other laptop) when you access it via
+// http://<your-mac-ip>:5174/office.html. Override with ?ws=ws://host:port
+function resolveWsUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const override = params.get('ws');
+  if (override) return override;
+  // Default: same host as the page, port 3000 (Colyseus server)
+  const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
+  const host = window.location.hostname || 'localhost';
+  return `${scheme}://${host}:3000`;
+}
+const WS = resolveWsUrl();
+
+// 12 agents — 4×3 grid, evenly spaced
+// Cols 4/9/14/19 — 5-tile spacing, desks (3 wide) don't touch walls
+// Rows 3/9/15 — 6-tile spacing: row N agent standing, N+1/N+2 desk, N+3..N+5 walkway
+// si = sprite sheet index (char_0..char_5) — grouped so row-mates have different skins
 const DEFS = [
-  {id:'scholar',  name:'Scholar',  emoji:'🎓',color:'#4fc3f7',col:2, row:3, si:0},
-  {id:'biz',      name:'Biz',      emoji:'💼',color:'#81c784',col:7, row:3, si:1},
-  {id:'research', name:'Research', emoji:'🔬',color:'#ffb74d',col:12,row:3, si:2},
-  {id:'atlas',    name:'Atlas',    emoji:'📅',color:'#ce93d8',col:17,row:3, si:3},
-  {id:'finance',  name:'Finance',  emoji:'💰',color:'#f48fb1',col:22,row:3, si:4},
-  {id:'exercise', name:'Exercise', emoji:'💪',color:'#80cbc4',col:2, row:10,si:5},
-  {id:'social',   name:'Social',   emoji:'📣',color:'#fff176',col:7, row:10,si:0},
-  {id:'nutrition',name:'Nutrition',emoji:'🍽',color:'#a5d6a7',col:12,row:10,si:1},
-  {id:'mental',   name:'Mental',   emoji:'🧠',color:'#ef9a9a',col:17,row:10,si:2},
-  {id:'comms',    name:'Comms',    emoji:'✉️',color:'#90caf9',col:22,row:10,si:3},
-  {id:'knowledge',name:'Knowledge',emoji:'📚',color:'#ffe082',col:7, row:17,si:4},
-  {id:'it',       name:'IT',       emoji:'💻',color:'#b0bec5',col:12,row:17,si:5},
-  // 🐕 Debug — the office dog. Lives in the Lounge Room (right side).
-  {id:'debug',    name:'Debug',    emoji:'🐕',color:'#d4a574',col:36,row:12,si:'dog', noTint:true},
+  // Row 1 — Strategic / leadership
+  {id:'atlas',    name:'Atlas',    emoji:'📅',color:'#ce93d8',col:4, row:3, si:3, group:'Strategy'},
+  {id:'scholar',  name:'Scholar',  emoji:'🎓',color:'#4fc3f7',col:9, row:3, si:0, group:'Strategy'},
+  {id:'research', name:'Research', emoji:'🔬',color:'#ffb74d',col:14,row:3, si:2, group:'Strategy'},
+  {id:'knowledge',name:'Knowledge',emoji:'📚',color:'#ffe082',col:19,row:3, si:4, group:'Strategy'},
+  // Row 2 — Business operations
+  {id:'biz',      name:'Biz',      emoji:'💼',color:'#81c784',col:4, row:9, si:1, group:'Business'},
+  {id:'finance',  name:'Finance',  emoji:'💰',color:'#f48fb1',col:9, row:9, si:4, group:'Business'},
+  {id:'comms',    name:'Comms',    emoji:'✉',color:'#90caf9',col:14,row:9, si:3, group:'Business'},
+  {id:'social',   name:'Social',   emoji:'📣',color:'#fff176',col:19,row:9, si:0, group:'Business'},
+  // Row 3 — Wellness / systems
+  {id:'exercise', name:'Exercise', emoji:'💪',color:'#80cbc4',col:4, row:15,si:5, group:'Wellness'},
+  {id:'nutrition',name:'Nutrition',emoji:'🍽',color:'#a5d6a7',col:9, row:15,si:1, group:'Wellness'},
+  {id:'mental',   name:'Mental',   emoji:'🧠',color:'#ef9a9a',col:14,row:15,si:2, group:'Wellness'},
+  {id:'it',       name:'IT',       emoji:'💻',color:'#b0bec5',col:19,row:15,si:5, group:'Wellness'},
 ];
 
 // Agent runtime state
@@ -129,17 +152,255 @@ DEFS.forEach(d => {
     // World pixel positions
     wx, wy,        // current (world)
     tx: wx, ty: wy, // target (world)
+    deskX: wx, deskY: wy, // home desk position (to return to)
     action: 'idle', thought: '...', busy: false,
     // Animation
-    frame: 0, frameTimer: 0,
+    frame: 1, frameTimer: 0,
+    walkStep: 0,
     dir: DIR_DOWN,
     flip: false,
-    // Walk timing
-    walkTimer: 0,
+    // Wander behavior (Pokemon-style NPC wandering)
+    wanderTimer: 0, // fire on first frame so agents start walking immediately
+    wanderCount: 0,
+    wanderLimit: 6 + Math.floor(Math.random() * 5), // 6-10 moves before rest
+    pausedAt: 0, // time still standing
+    purpose: null, // 'visit' | 'break' | 'roam' | 'rest' | null
+    visiting: null, // buddy id if visiting
+    chatMsg: null, // ephemeral message
+    chatTimer: 0,
     // Idle bob
     bobPhase: Math.random() * Math.PI * 2,
   };
 });
+
+// Walkable tile set — all tiles except walls and furniture
+// Furniture blocked tiles — precomputed once
+const BLOCKED = new Set();
+function blockTile(c, r) { BLOCKED.add(c + ',' + r); }
+// Walls
+for (let c = 0; c < COLS; c++) { blockTile(c, 0); blockTile(c, ROWS-1); }
+for (let r = 0; r < ROWS; r++) { blockTile(0, r); blockTile(COLS-1, r); }
+// Desks (3×2) + PCs for each agent
+DEFS.forEach(d => {
+  for (let dc = -1; dc <= 1; dc++) {
+    blockTile(d.col + dc, d.row + 1);
+    blockTile(d.col + dc, d.row + 2);
+  }
+});
+// Break area: sofas, ctable, side chairs, flanking plants
+[[9,12],[10,12],[13,12],[14,12],[11,13],[12,13],
+ [8,13],[15,13],[8,12],[15,12]].forEach(([c,r]) => blockTile(c,r));
+// Left/right wall columns: bookshelves, cactus, coffee, large plants, bins
+[[1,6],[1,7],[1,12],[1,17],[22,6],[22,7],[22,12],[22,17],
+ [2,18],[21,18],[4,18],[19,18]].forEach(([c,r]) => blockTile(c,r));
+// Whiteboard
+blockTile(1, 2);
+
+function isWalkable(col, row) {
+  if (col < 1 || row < 1 || col >= COLS-1 || row >= ROWS-1) return false;
+  return !BLOCKED.has(col + ',' + row);
+}
+
+// Relationship map — who visits whom (from context-bible.md inter-agent rules)
+const BUDDIES = {
+  atlas:     ['scholar','biz','finance','mental','exercise','social','comms'], // orchestrator
+  mental:    ['atlas','scholar','exercise','nutrition'], // circuit breaker
+  it:        ['knowledge','social','biz','research'], // weekly audits
+  exercise:  ['nutrition','mental'],
+  nutrition: ['exercise','scholar'],
+  biz:       ['finance','social','comms'],
+  finance:   ['biz','research','atlas'],
+  research:  ['scholar','finance','knowledge'],
+  scholar:   ['atlas','knowledge','research'],
+  social:    ['comms','biz','it'],
+  comms:     ['social','biz','atlas'],
+  knowledge: ['research','scholar','it'],
+};
+
+// Break area — middle sofa zone (agents gather here for "coffee")
+const BREAK_SPOTS = [
+  {col: 8, row: 13}, {col: 11, row: 14}, {col: 12, row: 14}, {col: 15, row: 13},
+];
+
+// Find a walkable tile adjacent to a target tile (for "visiting" someone's desk)
+function adjacentWalkable(col, row) {
+  const candidates = [[col-2,row],[col+2,row],[col,row-1],[col-1,row-1],[col+1,row-1]];
+  for (const [c, r] of candidates) if (isWalkable(c, r)) return { col: c, row: r };
+  return null;
+}
+
+// Pick a wander target with purpose:
+//   35% visit a buddy agent's desk area (across the whole office)
+//   20% hang out in the break area
+//   15% take a stroll to one of the far corners / points of interest
+//   30% roam anywhere on the floor
+function pickWanderTarget(agent) {
+  const roll = Math.random();
+
+  if (roll < 0.35) {
+    // Visit a buddy
+    const buddies = BUDDIES[agent.id] || [];
+    if (buddies.length) {
+      const targetId = buddies[Math.floor(Math.random() * buddies.length)];
+      const target = agents[targetId];
+      if (target) {
+        const spot = adjacentWalkable(target.col, target.row);
+        if (spot) {
+          return {
+            tx: spot.col * TILE + TILE / 2,
+            ty: spot.row * TILE + TILE,
+            purpose: 'visit', visiting: targetId,
+          };
+        }
+      }
+    }
+  } else if (roll < 0.55) {
+    // Break area
+    const spot = BREAK_SPOTS[Math.floor(Math.random() * BREAK_SPOTS.length)];
+    if (isWalkable(spot.col, spot.row)) {
+      return {
+        tx: spot.col * TILE + TILE / 2,
+        ty: spot.row * TILE + TILE,
+        purpose: 'break',
+      };
+    }
+  } else if (roll < 0.70) {
+    // Take a stroll to a landmark — coffee, whiteboard, plant corners, doormat
+    const landmarks = [
+      {col: 21, row: 13}, // coffee machine
+      {col: 2,  row: 2},  // whiteboard
+      {col: 2,  row: 18}, // bottom-left plant
+      {col: 21, row: 18}, // bottom-right plant
+      {col: 11, row: 18}, // entrance doormat
+      {col: 12, row: 18},
+      {col: 2,  row: 8},  // left-side bookshelf corridor
+      {col: 21, row: 8},  // right-side bookshelf corridor
+    ];
+    const spot = landmarks[Math.floor(Math.random() * landmarks.length)];
+    const adj = isWalkable(spot.col, spot.row) ? spot : adjacentWalkable(spot.col, spot.row);
+    if (adj) {
+      return {
+        tx: adj.col * TILE + TILE / 2,
+        ty: adj.row * TILE + TILE,
+        purpose: 'stroll',
+      };
+    }
+  }
+
+  // Roam ANYWHERE on the office floor (was previously ±2 tiles from desk).
+  // Pick random walkable tiles across the whole grid so agents actually
+  // traverse the full space.
+  for (let tries = 0; tries < 40; tries++) {
+    const col = 1 + Math.floor(Math.random() * (COLS - 2));
+    const row = 1 + Math.floor(Math.random() * (ROWS - 2));
+    if (isWalkable(col, row)) {
+      return {
+        tx: col * TILE + TILE / 2,
+        ty: row * TILE + TILE,
+        purpose: 'roam',
+      };
+    }
+  }
+  return { tx: agent.deskX, ty: agent.deskY, purpose: 'rest' };
+}
+
+// Simulate office conversation when two agents meet.
+// Pair-specific lines reference the actual topic each buddy pair shares
+// (taken from context-bible.md inter-agent rules).
+const PAIR_CHATTER = {
+  'atlas:scholar':    ['Berkeley plan?', 'AP Stats ready?', 'calendar check', 'FAFSA deadline?'],
+  'atlas:biz':        ['Lumina pipeline?', 'client next up?', 'weekly priorities'],
+  'atlas:finance':    ['burn check', 'runway ok?', 'FAFSA status'],
+  'atlas:mental':     ['John\'s stress?', 'nudge needed?', 'overload flag?'],
+  'atlas:exercise':   ['practice tonight?', 'car wash Apr 18', 'coaching prep'],
+  'mental:scholar':   ['AP load too heavy?', 'recovery window?'],
+  'mental:exercise':  ['sleep tracking?', 'stress + training?'],
+  'mental:nutrition': ['hydration?', 'cortisol check'],
+  'exercise:nutrition': ['macro timing', 'pre-game fuel', 'carb cycling', 'recovery meal'],
+  'biz:finance':      ['Lumina margins', 'Sunset Nails P&L', 'tier pricing?'],
+  'biz:social':       ['AZ wellness post', 'client case study'],
+  'biz:comms':        ['client email draft', 'scheduling conflict'],
+  'finance:research': ['stock desk note', 'Bay Area COL'],
+  'research:scholar': ['Hinksey refs', 'Harvard citations'],
+  'research:knowledge': ['archive sync', 'citation dump'],
+  'scholar:knowledge': ['note index', 'essay archive'],
+  'social:comms':     ['platform post', 'script review'],
+  'social:it':        ['site SEO check', 'broken links?'],
+  'knowledge:it':     ['backup run?', 'archive health'],
+  'it:biz':           ['Lumina audit', 'GitHub health'],
+};
+const GENERIC_CHATTER = [
+  'got a sec?','how\'s it going?','status update?','quick sync',
+  'checking in','got a minute?','stand-up?','syncing up','got updates',
+];
+// Ambient "thinking to myself" lines that pop up while agents walk around.
+// Keyed per-role so they reflect what each agent actually does.
+const WALKING_THOUGHTS = {
+  atlas:     ['check calendar','quarterly review','weekly plan','on the move'],
+  scholar:   ['AP Stats prep','Berkeley essay','Harvard draft','chem review'],
+  research:  ['stock ticker check','reading 10-K','citation lookup','market scan'],
+  knowledge: ['archive run','index update','note merge','backup check'],
+  biz:       ['Lumina client','Sunset Nails','pipeline check','next pitch'],
+  finance:   ['FAFSA math','tuition plan','cashflow','runway check'],
+  comms:     ['email draft','reply follow-up','copy edit','client note'],
+  social:    ['post ideas','script pass','hook v2','captions'],
+  exercise:  ['leg day','volley drills','warmup set','stretch time'],
+  nutrition: ['meal prep','macros','hydrate','grocery list'],
+  mental:    ['breathing check','stress ping','5 min pause','reflect'],
+  it:        ['site audit','GitHub scan','SSL check','backup run'],
+};
+function pickChatter(fromId, toId) {
+  const key1 = fromId + ':' + toId;
+  const key2 = toId + ':' + fromId;
+  const pool = PAIR_CHATTER[key1] || PAIR_CHATTER[key2] || GENERIC_CHATTER;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+function pickWalkingThought(id) {
+  const pool = WALKING_THOUGHTS[id] || GENERIC_CHATTER;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+// Meeting events — every 30-60s, randomly summon 3-5 buddies to either the
+// whiteboard (row 1) or the break area for a brief huddle.
+const MEETING_SPOTS = [
+  { name: 'whiteboard', col: 3, row: 2, radius: 2 },
+  { name: 'break',      col: 11, row: 13, radius: 2 },
+  { name: 'coffee',     col: 20, row: 12, radius: 2 },
+];
+let meetingCooldown = 6 + Math.random() * 4; // first huddle in 6-10s
+function tryStartMeeting(dt) {
+  meetingCooldown -= dt;
+  if (meetingCooldown > 0) return;
+  meetingCooldown = 18 + Math.random() * 22;
+  const spot = MEETING_SPOTS[Math.floor(Math.random() * MEETING_SPOTS.length)];
+  // Pick a random "host" agent and 2-3 of their buddies
+  const hostId = DEFS[Math.floor(Math.random() * DEFS.length)].id;
+  const buddies = (BUDDIES[hostId] || []).slice();
+  const attendees = [hostId];
+  while (attendees.length < 3 + Math.floor(Math.random() * 2) && buddies.length) {
+    const idx = Math.floor(Math.random() * buddies.length);
+    attendees.push(buddies.splice(idx, 1)[0]);
+  }
+  attendees.forEach((id, i) => {
+    const a = agents[id];
+    if (!a || a.busy) return;
+    // Spread them out around the meeting spot
+    const angle = (i / attendees.length) * Math.PI * 2;
+    const dc = Math.round(Math.cos(angle) * spot.radius);
+    const dr = Math.round(Math.sin(angle) * spot.radius);
+    let col = spot.col + dc, row = spot.row + dr;
+    if (!isWalkable(col, row)) {
+      const adj = adjacentWalkable(spot.col, spot.row);
+      if (adj) { col = adj.col; row = adj.row; }
+      else return;
+    }
+    a.tx = col * TILE + TILE / 2;
+    a.ty = row * TILE + TILE;
+    a.purpose = 'meeting';
+    a.wanderTimer = 6 + Math.random() * 3; // stay a bit before next wander
+  });
+  addFeed('Office', '🤝 huddle @ ' + spot.name + ' — ' + attendees.map(i => agents[i].name).join(', '), '#ffcc00');
+}
 
 // ── Canvas ──────────────────────────────────────────────────────────────────
 const canvas = document.getElementById('c');
@@ -162,6 +423,36 @@ function centerCam() {
 }
 resize();
 window.addEventListener('resize', resize);
+
+// Click handling — click an agent to trigger a "wave hello" chat bubble & log
+let focusedAgentId = null;
+canvas.addEventListener('click', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+  // Find nearest agent by screen distance
+  let best = null, bestDist = 48;
+  for (const d of DEFS) {
+    const a = agents[d.id];
+    const ax = a.wx * ZOOM - camX;
+    const ay = a.wy * ZOOM - camY - CHAR_H * ZOOM / 2;
+    const dist = Math.hypot(mx - ax, my - ay);
+    if (dist < bestDist) { best = d.id; bestDist = dist; }
+  }
+  if (best) {
+    const a = agents[best];
+    a.chatMsg = 'hey John!';
+    a.chatTimer = 2.5;
+    a.dir = DIR_DOWN; a.flip = false;
+    focusedAgentId = best;
+    addFeed(a.name, '👋 waves at you', a.color);
+    // Highlight sidebar card
+    document.querySelectorAll('.ac').forEach(el => el.classList.toggle('focus', el.id === 'card-' + best));
+  } else {
+    focusedAgentId = null;
+    document.querySelectorAll('.ac').forEach(el => el.classList.remove('focus'));
+  }
+});
 
 // ── Assets ──────────────────────────────────────────────────────────────────
 const imgs = {};
@@ -189,22 +480,10 @@ const assetList = [
   ['hplant','assets/furniture/HANGING_PLANT/HANGING_PLANT.png'],
   ['painting','assets/furniture/LARGE_PAINTING/LARGE_PAINTING.png'],
   ['painting2','assets/furniture/SMALL_PAINTING/SMALL_PAINTING.png'],
-  ['painting3','assets/furniture/SMALL_PAINTING_2/SMALL_PAINTING_2.png'],
   ['wchair','assets/furniture/WOODEN_CHAIR/WOODEN_CHAIR_FRONT.png'],
-  ['wchair_s','assets/furniture/WOODEN_CHAIR/WOODEN_CHAIR_SIDE.png'],
-  ['cchair','assets/furniture/CUSHIONED_CHAIR/CUSHIONED_CHAIR_FRONT.png'],
-  ['cbench','assets/furniture/CUSHIONED_BENCH/CUSHIONED_BENCH.png'],
-  ['wbench','assets/furniture/WOODEN_BENCH/WOODEN_BENCH.png'],
-  ['pot','assets/furniture/POT/POT.png'],
-  ['plant2','assets/furniture/PLANT_2/PLANT_2.png'],
-  ['stable_f','assets/furniture/SMALL_TABLE/SMALL_TABLE_FRONT.png'],
-  ['table_f','assets/furniture/TABLE_FRONT/TABLE_FRONT.png'],
-  ['sofa_b','assets/furniture/SOFA/SOFA_BACK.png'],
   ['bin','assets/furniture/BIN/BIN.png'],
 ];
 for (let i = 0; i < 6; i++) assetList.push([`ch${i}`, `assets/characters/char_${i}.png`]);
-// 🐕 Dog spritesheet for Debug — same 16x32 format
-assetList.push(['chdog', 'assets/characters/dog.png']);
 
 assetList.forEach(([k, src]) => {
   const img = new Image();
@@ -217,41 +496,10 @@ function assetsReady() { return loaded >= totalAssets; }
 
 // Pre-built offscreen canvases for each character frame (keyed by "si_row_frame_flip")
 const frameCache = {};
-
-// Parse hex color to RGB
-function hexRGB(hex) {
-  const h = hex.replace('#', '');
-  return {
-    r: parseInt(h.slice(0,2), 16),
-    g: parseInt(h.slice(2,4), 16),
-    b: parseInt(h.slice(4,6), 16),
-  };
-}
-
-// Apply clothing tint via multiply blend over the sprite.
-// Skips fully transparent pixels. Preserves original detail.
-function tintSprite(sourceCanvas, tintHex) {
-  const c = document.createElement('canvas');
-  c.width = sourceCanvas.width;
-  c.height = sourceCanvas.height;
-  const cx = c.getContext('2d');
-  cx.imageSmoothingEnabled = false;
-  // 1. Draw original sprite
-  cx.drawImage(sourceCanvas, 0, 0);
-  // 2. Overlay tint using 'multiply' blend, masked to existing pixels
-  cx.globalCompositeOperation = 'source-atop';
-  cx.fillStyle = tintHex + '66'; // ~40% alpha wash
-  cx.fillRect(0, 0, c.width, c.height);
-  cx.globalCompositeOperation = 'source-over';
-  return c;
-}
-
-function getFrame(si, row, frame, flip, tintHex) {
-  const key = `${si}_${row}_${frame}_${flip?1:0}_${tintHex||'none'}`;
+function getFrame(si, row, frame, flip) {
+  const key = `${si}_${row}_${frame}_${flip?1:0}`;
   if (frameCache[key]) return frameCache[key];
-  // Dog (Debug agent) uses string sprite key 'dog'; humans use numeric index.
-  const spriteKey = (typeof si === 'string') ? `ch${si}` : `ch${si % 6}`;
-  const img = imgs[spriteKey];
+  const img = imgs[`ch${si % 6}`];
   if (!img || !img.complete || !img.naturalWidth) return null;
   const oc = document.createElement('canvas');
   oc.width = CHAR_W * ZOOM;
@@ -266,10 +514,8 @@ function getFrame(si, row, frame, flip, tintHex) {
     frame * CHAR_W, row * CHAR_H, CHAR_W, CHAR_H,
     0, 0, CHAR_W * ZOOM, CHAR_H * ZOOM
   );
-
-  const final = tintHex ? tintSprite(oc, tintHex) : oc;
-  frameCache[key] = final;
-  return final;
+  frameCache[key] = oc;
+  return oc;
 }
 
 // ── Drawing helpers ──────────────────────────────────────────────────────────
@@ -283,97 +529,91 @@ function sprTile(key, col, row) {
 }
 
 // ── Floor ──────────────────────────────────────────────────────────────────
+// Zone rugs — Pokémon-style team floor tinting (col range, row range, tint rgba)
+const ZONES = [
+  // Strategy (row 1 agents) — cool blue wash
+  {c0:3, c1:20, r0:2, r1:5, tint:'rgba(79,195,247,0.08)', border:'rgba(79,195,247,0.35)'},
+  // Business (row 2 agents) — warm green wash
+  {c0:3, c1:20, r0:8, r1:11, tint:'rgba(129,199,132,0.08)', border:'rgba(129,199,132,0.35)'},
+  // Break zone — amber wash
+  {c0:8, c1:15, r0:12, r1:14, tint:'rgba(255,204,0,0.07)', border:'rgba(255,204,0,0.3)'},
+  // Wellness (row 3 agents) — soft red wash
+  {c0:3, c1:20, r0:14, r1:17, tint:'rgba(239,154,154,0.08)', border:'rgba(239,154,154,0.35)'},
+];
+
 function drawFloor() {
-  // Office Room: cooler floor palette (f0, f1, f2)
-  // Lounge Room: warmer floor palette (f2, f3, f1)
-  const officeKeys = ['f0','f1','f2','f0'];
-  const loungeKeys = ['f2','f3','f3','f1'];
+  const keys = ['f0','f1','f2','f3'];
   for (let r = 1; r < ROWS-1; r++) {
     for (let c = 1; c < COLS-1; c++) {
       const x = c*S - camX, y = r*S - camY;
       if (x < -S || y < -S || x > canvas.width+S || y > canvas.height+S) continue;
-      const keys = c < ROOM_DIVIDE_COL ? officeKeys : loungeKeys;
       const k = keys[(c*3 + r*7) % keys.length];
       const img = imgs[k] || imgs['f0'];
       if (img && img.complete) ctx.drawImage(img, 0,0,16,16, x,y,S,S);
     }
   }
+  // Zone rugs — semi-transparent team-color overlays with dashed border
+  ZONES.forEach(z => {
+    const x = z.c0*S - camX, y = z.r0*S - camY;
+    const w = (z.c1 - z.c0 + 1)*S, h = (z.r1 - z.r0 + 1)*S;
+    ctx.fillStyle = z.tint;
+    ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = z.border;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([S/6, S/4]);
+    ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
+    ctx.setLineDash([]);
+  });
+  // Entrance doormat (bottom-center)
+  const doorC = Math.floor(COLS/2) - 1;
+  const doorX = doorC*S - camX, doorY = (ROWS-2)*S - camY;
+  ctx.fillStyle = 'rgba(233,69,96,0.15)';
+  ctx.fillRect(doorX, doorY, S*2, S);
+  ctx.strokeStyle = 'rgba(233,69,96,0.5)';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(doorX + 2, doorY + 2, S*2 - 4, S - 4);
 }
 
 // ── Walls ──────────────────────────────────────────────────────────────────
+// Uses the pixel-agents wall sprite — 16×32 piece: upper 16px is the 3D face
+// (extends above the tile), lower 16px is the floor-level base.
 function drawWalls() {
   const img = imgs['wall'];
   if (!img || !img.complete) return;
-  // Top wall (full width of both rooms)
+
+  // Pick the "flat center" tile from the 4×4 auto-tile grid (bitmask ~7)
+  // Each piece in walls.png is 16w × 32h.
+  const SW = 16, SH = 32;
+  const bmCol = 3, bmRow = 1; // roughly a flat horizontal piece
+  const sx = bmCol * SW, sy = bmRow * SH;
+
+  // Helper: draw one wall tile with its 3D face extending up by 1 tile
+  const drawWall = (c, r) => {
+    // Sprite is 32px tall → scaled = S*2, draw so bottom aligns with tile's bottom
+    ctx.drawImage(img, sx, sy, SW, SH,
+      c*S - camX, (r-1)*S - camY, S, S*2);
+  };
+
+  // Top wall (row 0) — 3D face extends "up" off-screen, which is fine
+  for (let c = 0; c < COLS; c++) drawWall(c, 0);
+  // Floor-level shadow cast by the back wall
   for (let c = 0; c < COLS; c++) {
-    ctx.drawImage(img, 0,0,16,16, c*S-camX, 0-camY, S, S);
-    const g = ctx.createLinearGradient(0, S-camY, 0, S+8-camY);
-    g.addColorStop(0,'rgba(0,0,0,.45)'); g.addColorStop(1,'rgba(0,0,0,0)');
-    ctx.fillStyle = g; ctx.fillRect(c*S-camX, S-camY, S, 8);
+    const g = ctx.createLinearGradient(0, S-camY, 0, S+12-camY);
+    g.addColorStop(0,'rgba(0,0,0,.55)'); g.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle = g; ctx.fillRect(c*S-camX, S-camY, S, 12);
   }
-  // Left + right exterior walls
+  // Side walls (left + right)
   for (let r = 1; r < ROWS; r++) {
-    ctx.drawImage(img, 0,0,16,16, 0-camX, r*S-camY, S, S);
-    ctx.drawImage(img, 0,0,16,16, (COLS-1)*S-camX, r*S-camY, S, S);
+    drawWall(0, r);
+    drawWall(COLS-1, r);
   }
   // Bottom wall
-  for (let c = 0; c < COLS; c++)
-    ctx.drawImage(img, 0,0,16,16, c*S-camX, (ROWS-1)*S-camY, S, S);
-
-  // ── Interior dividing wall between Office and Lounge ─────────────────────
-  // Vertical wall at col ROOM_DIVIDE_COL, with doorway gap at DOOR_ROW_TOP..BOT
-  for (let r = 1; r < ROWS - 1; r++) {
-    if (r >= DOOR_ROW_TOP && r <= DOOR_ROW_BOT) continue; // leave doorway open
-    ctx.drawImage(img, 0,0,16,16, ROOM_DIVIDE_COL*S - camX, r*S - camY, S, S);
-    // Shadow below each wall piece
-    const g = ctx.createLinearGradient(0, r*S+S-camY, 0, r*S+S+6-camY);
-    g.addColorStop(0, 'rgba(0,0,0,.3)'); g.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = g;
-    ctx.fillRect(ROOM_DIVIDE_COL*S - camX, r*S + S - camY, S, 6);
-  }
-  // Doorway frame accents (thin dark pillars on each side of the gap)
-  ctx.fillStyle = '#1a1028';
-  ctx.fillRect(ROOM_DIVIDE_COL*S - camX + S - 4, (DOOR_ROW_TOP)*S - camY, 4, 4);
-  ctx.fillRect(ROOM_DIVIDE_COL*S - camX + S - 4, (DOOR_ROW_BOT+1)*S - camY - 4, 4, 4);
-  // Room labels floating above each zone
-  ctx.save();
-  ctx.font = 'bold 10px "Courier New", monospace';
-  ctx.textAlign = 'center';
-  ctx.fillStyle = 'rgba(233, 69, 96, 0.35)';
-  ctx.fillText('◆ WORKSPACE ◆', 12*S - camX, S*1.5 - camY);
-  ctx.fillStyle = 'rgba(129, 199, 132, 0.35)';
-  ctx.fillText('◆ LOUNGE ◆', 36*S - camX, S*1.5 - camY);
-  ctx.restore();
+  for (let c = 1; c < COLS-1; c++) drawWall(c, ROWS-1);
 }
 
 // ── Furniture ──────────────────────────────────────────────────────────────
 function drawFurniture(pcTick) {
   const pcKey = ['pc1','pc2','pc3'][Math.floor(pcTick/40) % 3];
-
-  // ── Floor rugs (drawn first so furniture sits on top) ──────────
-  // Lounge rug — warm orange under the sofa area
-  ctx.fillStyle = 'rgba(180, 95, 60, 0.35)';
-  ctx.fillRect(7*S - camX, 13*S - camY, 6*S, 5*S);
-  ctx.strokeStyle = 'rgba(140, 70, 40, 0.55)';
-  ctx.lineWidth = 2;
-  ctx.strokeRect(7*S - camX, 13*S - camY, 6*S, 5*S);
-  // Inner rug pattern
-  ctx.strokeStyle = 'rgba(210, 140, 90, 0.4)';
-  ctx.lineWidth = 1;
-  ctx.strokeRect(7*S + 8 - camX, 13*S + 8 - camY, 6*S - 16, 5*S - 16);
-
-  // Meeting rug — cool teal under whiteboard table
-  ctx.fillStyle = 'rgba(60, 120, 130, 0.3)';
-  ctx.fillRect(13*S - camX, 12*S - camY, 4*S, 3*S);
-  ctx.strokeStyle = 'rgba(40, 90, 100, 0.5)';
-  ctx.lineWidth = 2;
-  ctx.strokeRect(13*S - camX, 12*S - camY, 4*S, 3*S);
-
-  // Study rug — muted purple
-  ctx.fillStyle = 'rgba(110, 80, 140, 0.3)';
-  ctx.fillRect(1*S - camX, 13*S - camY, 4*S, 3*S);
-  ctx.strokeStyle = 'rgba(80, 55, 110, 0.5)';
-  ctx.strokeRect(1*S - camX, 13*S - camY, 4*S, 3*S);
 
   // Agent desks
   DEFS.forEach(d => {
@@ -392,132 +632,41 @@ function drawFurniture(pcTick) {
     }
   });
 
-  // Shared office items [key, col, row] — richly decorated office
+  // Shared office items [key, col, row] — no overlap, grouped by zone
   [
-    // ── Wall decorations (top row) ─────────────────────────────
-    ['painting',  3,  0], ['clock',    6,  0], ['painting3', 9,  0],
-    ['wboard',   11,  0], ['painting2',15, 0], ['painting',  18, 0],
-    ['hplant',    2,  0], ['hplant',   13, 0], ['hplant',   21, 0],
+    // Wall decor (row 1 — sits below the wall sprite, fills the upper strip)
+    ['clock',    11, 1], ['clock',     12, 1],
+    ['painting',  2, 1], ['painting2',  7, 1],
+    ['painting', 15, 1], ['painting2', 20, 1],
+    ['hplant',    6, 1], ['hplant',    17, 1],
 
-    // ── Left wall: full library ────────────────────────────────
-    ['book',      0,  5], ['book',    0,  6], ['dbook',    0,  7],
-    ['book',      0,  8], ['dbook',   0,  12], ['book',    0, 13],
-    ['plant',     1,  5], ['cactus',  1,  9], ['pot',      1, 12],
+    // Left-wall storage column (col 1, between walls and first desk column)
+    ['wboard',  1,  2],
+    ['book',    1,  6], ['dbook',    1,  7],
+    ['cactus',  1, 12],
+    ['lplant',  1, 17],
 
-    // ── Right wall: plants + bookshelf ─────────────────────────
-    ['dbook',    23,  5], ['book',    23,  7],
-    ['lplant',   23,  9], ['plant2',  23, 13], ['pot',     23, 15],
+    // Right-wall storage column (col 22)
+    ['dbook',  22,  6], ['book',    22,  7],
+    ['coffee', 22, 12],
+    ['lplant', 22, 17],
 
-    // ── Top row corners: welcoming plants ──────────────────────
-    ['plant',     1,  1], ['plant2',  22,  1],
-    ['cactus',    5,  1], ['cactus',  16, 1],
+    // Walkway decor between row 1 and row 2 of agents
+    ['plant',   2, 7],  ['plant',  21, 7],
+    ['cactus', 11, 7],  ['cactus', 12, 7],
 
-    // ── Central lounge (rows 13-16) ────────────────────────────
-    ['sofa_b',    8, 13], ['sofa_b',  10, 13],
-    ['sofa_s',    7, 14], ['sofa_s',  11, 14],
-    ['sofa_f',    8, 16], ['sofa_f',  10, 16],
-    ['ctable',    9, 15],
-    ['cchair',    6, 15], ['cchair',  12, 15],
-    ['wbench',    9, 17],
-    ['pot',       6, 13], ['pot',     12, 13],
+    // Break / lounge area — a proper 4-seat couch cluster with side chairs
+    ['sofa_f',  9, 12], ['sofa_f', 10, 12], ['sofa_f', 13, 12], ['sofa_f', 14, 12],
+    ['ctable', 11, 13],
+    ['wchair',  8, 13], ['wchair',  15, 13],
+    ['plant',   8, 12], ['plant',   15, 12],
 
-    // ── Coffee corner (right side) ─────────────────────────────
-    ['coffee',   22,  7], ['stable_f', 20, 7],
-    ['cchair',   19,  8], ['cchair',  20,  8],
-    ['cbench',   18,  9],
+    // Side accents in the lower walkway
+    ['cactus',  4, 18], ['cactus', 19, 18],
 
-    // ── Whiteboard / meeting zone ──────────────────────────────
-    ['table_f',  14, 13], ['wchair',  13, 13], ['wchair_s', 15, 13],
-    ['wchair',   14, 12],
-
-    // ── Study nook (left side) ─────────────────────────────────
-    ['stable_f',  2, 14], ['wchair',   3, 14], ['wchair_s',  1, 14],
-    ['plant',     4, 13],
-
-    // ── Bottom area: kitchen-ish zone ──────────────────────────
-    ['table_f',  18, 17], ['wchair',  18, 16], ['wchair',  19, 16],
-    ['bin',       1, 17], ['bin',     22, 17],
-    ['cactus',   16, 17], ['plant',    5, 17],
-
-    // ── Extra detail dots throughout ───────────────────────────
-    ['pot',       4,  9], ['pot',     19, 13],
-    ['cactus',   11,  8], ['cactus',   9,  8],
-
-    // ═══════════════════════════════════════════════════════════════
-    // ──  LOUNGE ROOM  (cols 25-47) — recreation, rest, chill ─────
-    // ═══════════════════════════════════════════════════════════════
-
-    // ── Top-wall decorations (right room) ──────────────────────
-    ['painting',  28,  0], ['clock',    34,  0], ['painting2', 38,  0],
-    ['painting3', 41,  0], ['hplant',   27,  0], ['hplant',    44,  0],
-
-    // ── Gym / fitness corner (top-left of lounge) ──────────────
-    ['wboard',    26,  0], // workout planning board
-    ['wbench',    27,  3], ['wbench',   29,  3], // workout benches
-    ['cactus',    26,  3],
-
-    // ── Game / entertainment zone (upper-right) ────────────────
-    ['sofa_f',    39,  4], ['sofa_f',   41,  4],
-    ['ctable',    40,  5], // TV table (pretend it's a screen)
-    ['cchair',    38,  5], ['cchair',   43,  5],
-    ['plant2',    45,  3], ['plant',    37,  3],
-
-    // ── Big central lounge seating (middle of room) ────────────
-    ['sofa_b',    32, 10], ['sofa_b',   34, 10],
-    ['sofa_s',    31, 11], ['sofa_s',   35, 11],
-    ['sofa_f',    32, 13], ['sofa_f',   34, 13],
-    ['ctable',    33, 12],
-    ['cchair',    30, 12], ['cchair',   36, 12],
-    ['pot',       30, 10], ['pot',      36, 10],
-
-    // ── Dining / kitchenette (bottom-left of lounge) ───────────
-    ['table_f',   27, 15], ['table_f',  29, 15],
-    ['wchair',    27, 14], ['wchair',   29, 14],
-    ['wchair',    27, 17], ['wchair',   29, 17],
-    ['coffee',    25, 14],
-    ['stable_f',  26, 15],
-
-    // ── Reading nook (bottom-right of lounge) ──────────────────
-    ['book',      46,  7], ['book',     46,  8], ['dbook',    46,  9],
-    ['book',      46, 10], ['book',     46, 11],
-    ['cchair',    44, 14], ['stable_f', 43, 14],
-    ['lplant',    46, 14], ['plant',    42, 15],
-
-    // ── Bottom decoration row (lounge) ─────────────────────────
-    ['cactus',    32, 17], ['cactus',   38, 17],
-    ['bin',       25, 17], ['bin',      46, 17],
-    ['plant',     34, 17], ['pot',      36, 17],
-
-    // ── Wall plants along divider (lounge side) ───────────────
-    ['plant',     25,  6], ['pot',      25, 12],
-    ['hplant',    25,  4],
+    // Bins near walls
+    ['bin',     2, 18], ['bin',    21, 18],
   ].forEach(([k,c,r]) => sprTile(k, c, r));
-
-  // ── Ambient light halos (soft glowing spots) ────────────────────
-  const lights = [
-    // Office room
-    { col: 6,  row: 0, color: 'rgba(255, 220, 130, 0.15)', r: 80 },
-    { col: 12, row: 0, color: 'rgba(255, 220, 130, 0.15)', r: 80 },
-    { col: 18, row: 0, color: 'rgba(255, 220, 130, 0.15)', r: 80 },
-    { col: 22, row: 7, color: 'rgba(255, 180, 100, 0.18)', r: 60 },
-    { col: 9,  row: 15, color: 'rgba(255, 200, 150, 0.12)', r: 100 },
-    // Lounge room
-    { col: 28, row: 0,  color: 'rgba(255, 200, 140, 0.18)', r: 90 },
-    { col: 35, row: 0,  color: 'rgba(255, 200, 140, 0.18)', r: 90 },
-    { col: 42, row: 0,  color: 'rgba(255, 200, 140, 0.18)', r: 90 },
-    { col: 33, row: 12, color: 'rgba(255, 195, 155, 0.18)', r: 120 }, // lounge glow
-    { col: 40, row: 5,  color: 'rgba(140, 180, 255, 0.14)', r: 80 },  // game/TV glow
-    { col: 25, row: 14, color: 'rgba(255, 160, 80, 0.20)',  r: 60 },  // kitchenette coffee
-    { col: 28, row: 4,  color: 'rgba(130, 200, 160, 0.15)', r: 70 },  // gym corner
-  ];
-  lights.forEach(l => {
-    const cx = l.col*S + S/2 - camX, cy = l.row*S + S/2 - camY;
-    const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, l.r);
-    g.addColorStop(0, l.color);
-    g.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = g;
-    ctx.fillRect(cx - l.r, cy - l.r, l.r*2, l.r*2);
-  });
 }
 
 // ── Characters — correct pixel-agents rendering ──────────────────────────────
@@ -527,9 +676,59 @@ function drawFurniture(pcTick) {
 const WALK_SPEED = 48; // px/sec (matches pixel-agents WALK_SPEED_PX_PER_SEC)
 let lastTime = 0;
 
+// Footstep dust particles — spawned when agents walk
+const particles = [];
+function spawnDust(sx, sy, color) {
+  particles.push({
+    x: sx + (Math.random() - 0.5) * 6,
+    y: sy - 2,
+    vx: (Math.random() - 0.5) * 0.3,
+    vy: -0.2 - Math.random() * 0.2,
+    life: 0.6 + Math.random() * 0.3,
+    age: 0,
+    size: 1.5 + Math.random() * 1.5,
+    color,
+  });
+}
+function drawParticles(dt) {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.age += dt;
+    if (p.age >= p.life) { particles.splice(i, 1); continue; }
+    p.x += p.vx;
+    p.y += p.vy;
+    const alpha = 1 - p.age / p.life;
+    ctx.fillStyle = p.color + Math.floor(alpha * 140).toString(16).padStart(2, '0');
+    ctx.fillRect(Math.round(p.x), Math.round(p.y), p.size, p.size);
+  }
+}
+
 function drawAgents(ts) {
   const dt = Math.min((ts - lastTime) / 1000, 0.1);
   lastTime = ts;
+
+  // Meetings: occasionally summon a group of buddies to a landmark
+  tryStartMeeting(dt);
+
+  // Proximity gossip — when two non-busy agents pass within 1.5 tiles of each
+  // other, pop a quick line above their heads.
+  for (let i = 0; i < DEFS.length; i++) {
+    const a1 = agents[DEFS[i].id];
+    if (a1.busy || a1.chatMsg) continue;
+    for (let j = i + 1; j < DEFS.length; j++) {
+      const a2 = agents[DEFS[j].id];
+      if (a2.busy || a2.chatMsg) continue;
+      const d2 = Math.hypot(a1.wx - a2.wx, a1.wy - a2.wy);
+      if (d2 < TILE * 1.5 && Math.random() < 0.01) {
+        a1.chatMsg = pickChatter(DEFS[i].id, DEFS[j].id);
+        a1.chatTimer = 2;
+        a2.chatMsg = Math.random() < 0.5 ? 'yeah' : 'got it';
+        a2.chatTimer = 1.6;
+        addFeed(DEFS[i].name, '→ ' + DEFS[j].name + ': ' + a1.chatMsg, DEFS[i].color);
+        break;
+      }
+    }
+  }
 
   // Sort by world Y (bottom coord) for proper depth order
   const sorted = [...DEFS].sort((a,b) => agents[a.id].wy - agents[b.id].wy);
@@ -547,6 +746,12 @@ function drawAgents(ts) {
       a.wx += (dx/dist) * step;
       a.wy += (dy/dist) * step;
 
+      // Ambient "thinking while walking" bubble — very occasional
+      if (!a.chatMsg && Math.random() < 0.003) {
+        a.chatMsg = pickWalkingThought(d.id);
+        a.chatTimer = 1.8;
+      }
+
       // Direction from movement delta
       if (Math.abs(dx) > Math.abs(dy)) {
         a.dir = DIR_RIGHT;
@@ -556,14 +761,100 @@ function drawAgents(ts) {
         a.flip = false;
       }
 
-      // Walk animation: 4 frames
+      // Walk cycle — pixel-agents frames 0,1,2,1 (3 frames, ping-pong)
       a.frameTimer += dt;
-      if (a.frameTimer > 0.15) { a.frameTimer = 0; a.frame = (a.frame + 1) % 4; }
+      if (a.frameTimer > 0.14) {
+        a.frameTimer = 0;
+        a.walkStep = (a.walkStep + 1) % 4;
+        // pattern: 0, 1, 2, 1
+        a.frame = [0, 1, 2, 1][a.walkStep];
+        // Dust on foot-down frames (0 and 2)
+        if (a.frame === 0 || a.frame === 2) {
+          const px = Math.round(a.wx * ZOOM - camX);
+          const py = Math.round(a.wy * ZOOM - camY);
+          spawnDust(px, py, '#9a8a70');
+        }
+      }
+      a.pausedAt = 0;
     } else {
-      // Idle: frame 1 (standing still)
-      a.frame = 1;
-      a.frameTimer = 0;
-      // Gentle idle bob using world Y offset
+      // Standing still — pick an idle / typing / reading animation frame.
+      // Typing/reading plays ONLY when the agent happens to be at their desk
+      // during a rest cycle. Otherwise (paused mid-wander, at break area,
+      // standing next to a buddy) they show the idle stance.
+      const atDesk = Math.abs(a.wx - a.deskX) < 2 && Math.abs(a.wy - a.deskY) < 2;
+
+      if (a.busy && atDesk && (a.purpose === 'rest' || a.purpose === null)) {
+        a.frameTimer += dt;
+        if (a.frameTimer > 0.22) {
+          a.frameTimer = 0;
+          const readingTools = a.action === 'use_tool' && /read|grep|fetch|search/i.test(a.thought || '');
+          if (readingTools) {
+            a.frame = a.frame === 5 ? 6 : 5;
+          } else {
+            a.frame = a.frame === 3 ? 4 : 3;
+          }
+        }
+        a.dir = DIR_DOWN;
+        a.flip = false;
+      } else {
+        a.frame = 1;
+        a.frameTimer = 0;
+      }
+      a.pausedAt += dt;
+
+      // Tick chat bubble timer
+      if (a.chatTimer > 0) {
+        a.chatTimer -= dt;
+        if (a.chatTimer <= 0) a.chatMsg = null;
+      }
+
+      // ── Wander behavior — runs UNCONDITIONALLY. Agents roam the office
+      // regardless of server-reported busy state. The `busy` flag only
+      // affects bubble text and the at-desk typing animation. This way the
+      // office stays alive even when every agent is mid-Ollama-think.
+      {
+        // On arrival at wander target — trigger "interaction" event
+        if (a.purpose === 'visit' && a.visiting) {
+          const buddy = agents[a.visiting];
+          if (buddy) {
+            a.chatMsg = pickChatter(d.id, a.visiting);
+            a.chatTimer = 2.4;
+            const bdx = buddy.wx - a.wx;
+            if (Math.abs(bdx) > 1) { a.dir = DIR_RIGHT; a.flip = bdx < 0; }
+            else a.dir = buddy.wy > a.wy ? DIR_DOWN : DIR_UP;
+            if (!buddy.chatMsg) {
+              buddy.chatMsg = 'noted';
+              buddy.chatTimer = 1.8;
+              const bdx2 = a.wx - buddy.wx;
+              if (Math.abs(bdx2) > 1) { buddy.dir = DIR_RIGHT; buddy.flip = bdx2 < 0; }
+              else buddy.dir = a.wy > buddy.wy ? DIR_DOWN : DIR_UP;
+            }
+            addFeed(d.name, '→ ' + buddy.name + ': ' + a.chatMsg, d.color);
+          }
+          a.purpose = null;
+          a.visiting = null;
+        }
+
+        a.wanderTimer -= dt;
+        if (a.wanderTimer <= 0) {
+          if (a.wanderCount >= a.wanderLimit) {
+            // Rest cycle — return to desk briefly then roam again
+            a.tx = a.deskX; a.ty = a.deskY;
+            a.purpose = 'rest';
+            a.wanderCount = 0;
+            a.wanderLimit = 6 + Math.floor(Math.random() * 5);
+            a.wanderTimer = 2 + Math.random() * 2.5; // rest 2-4.5s
+          } else {
+            const t = pickWanderTarget(a);
+            a.tx = t.tx; a.ty = t.ty;
+            a.purpose = t.purpose;
+            a.visiting = t.visiting || null;
+            a.wanderCount++;
+            // Short dwell between wanders so they keep moving
+            a.wanderTimer = 0.8 + Math.random() * 1.6;
+          }
+        }
+      }
     }
 
     // ── Screen position (bottom-center anchor, matching pixel-agents) ─────
@@ -577,15 +868,18 @@ function drawAgents(ts) {
     const bob = moving ? 0 : Math.sin(ts * 0.002 + a.bobPhase) * 1.5;
 
     // ── Draw character sprite ─────────────────────────────────────────────
-    // Dog skips tinting — keep its natural fur color
-    const tintColor = d.noTint ? null : d.color;
-    const frame = getFrame(d.si, a.dir, a.frame, a.flip, tintColor);
+    const frame = getFrame(d.si, a.dir, a.frame, a.flip);
     const charW = CHAR_W * ZOOM; // 48px
     const charH = CHAR_H * ZOOM; // 96px
 
+    // Sitting offset — when typing/reading at desk, shift down so the
+    // character visually sits in their chair (matches pixel-agents).
+    const isTyping = a.frame >= 3 && a.frame <= 6;
+    const sitOffset = isTyping ? 6 * ZOOM : 0;
+
     if (frame) {
-      // Draw at (sx - charW/2, sy - charH + bob) — bottom-center anchor
-      ctx.drawImage(frame, sx - charW/2, sy - charH + bob);
+      // Draw at (sx - charW/2, sy - charH + bob + sitOffset)
+      ctx.drawImage(frame, sx - charW/2, sy - charH + bob + sitOffset);
     } else {
       // Fallback circle (shown before sprites load)
       ctx.beginPath();
@@ -607,11 +901,6 @@ function drawAgents(ts) {
       ctx.stroke();
     }
 
-    // ── Role emoji badge (above character) ────────────────────────────────
-    ctx.font = '13px serif';
-    ctx.textAlign = 'center';
-    ctx.fillText(d.emoji, sx, sy - charH - 18 + bob);
-
     // ── Name label (above head) ───────────────────────────────────────────
     ctx.font = 'bold 9px "Courier New", monospace';
     ctx.textAlign = 'center';
@@ -622,16 +911,20 @@ function drawAgents(ts) {
     ctx.fillStyle = d.color;
     ctx.fillText(d.name, sx, nameY);
 
-    // ── Action indicator (above role emoji) ───────────────────────────────
+    // ── Action indicator ──────────────────────────────────────────────────
     if (a.action !== 'idle') {
-      ctx.font = '11px serif';
+      ctx.font = '13px serif';
       ctx.fillText(a.action==='work'?'⚙️':a.action==='talk'?'💬':'🔍',
-        sx + 10, sy - charH - 18 + bob);
+        sx, sy - charH - 18 + bob);
     }
 
-    // ── Thought bubble ────────────────────────────────────────────────────
-    if (a.busy && a.thought && a.thought !== '...') {
-      const txt = a.thought.length > 30 ? a.thought.slice(0,27)+'…' : a.thought;
+    // ── Thought / chat bubble ─────────────────────────────────────────────
+    let bubbleTxt = null;
+    if (a.chatMsg) bubbleTxt = a.chatMsg;
+    else if (a.busy && a.thought && a.thought !== '...') bubbleTxt = a.thought;
+
+    if (bubbleTxt) {
+      const txt = bubbleTxt.length > 30 ? bubbleTxt.slice(0,27)+'…' : bubbleTxt;
       ctx.font = '9px "Courier New",monospace';
       ctx.textAlign = 'center';
       const bw = Math.min(ctx.measureText(txt).width + 10, 170);
@@ -644,6 +937,14 @@ function drawAgents(ts) {
       ctx.fill(); ctx.stroke();
       ctx.fillStyle = d.color + 'dd';
       ctx.fillText(txt, sx, by + 11);
+      // Tail pointing to character head
+      ctx.fillStyle = 'rgba(8,8,24,.92)';
+      ctx.beginPath();
+      ctx.moveTo(sx - 3, by + 14);
+      ctx.lineTo(sx + 3, by + 14);
+      ctx.lineTo(sx, by + 18);
+      ctx.closePath();
+      ctx.fill();
     }
   });
 }
@@ -652,17 +953,45 @@ function drawAgents(ts) {
 function buildSidebar() {
   const list = document.getElementById('alist');
   if (list.children.length) return;
+
+  // Group agents by their `group` field, preserving DEFS order
+  const byGroup = [];
   DEFS.forEach(d => {
-    const card = document.createElement('div');
-    card.className = 'ac';
-    card.id = 'card-' + d.id;
-    card.style.setProperty('--c', d.color);
-    card.innerHTML =
-      `<div class="an">${d.emoji} ${d.name}</div>` +
-      `<div class="at" id="th-${d.id}">...</div>` +
-      `<div class="as"><span class="ad" id="dt-${d.id}"></span>` +
-      `<span class="aa" id="ac-${d.id}">idle</span></div>`;
-    list.appendChild(card);
+    let bucket = byGroup.find(g => g.name === d.group);
+    if (!bucket) { bucket = {name: d.group, items: []}; byGroup.push(bucket); }
+    bucket.items.push(d);
+  });
+
+  const groupColors = {Strategy:'#4fc3f7', Business:'#81c784', Wellness:'#ef9a9a'};
+
+  byGroup.forEach(g => {
+    const hdr = document.createElement('div');
+    hdr.className = 'grp';
+    hdr.style.setProperty('--c', groupColors[g.name] || '#e94560');
+    hdr.innerHTML = `<span>${g.name}</span><span class="grp-c">${g.items.length}</span>`;
+    list.appendChild(hdr);
+
+    g.items.forEach(d => {
+      const card = document.createElement('div');
+      card.className = 'ac';
+      card.id = 'card-' + d.id;
+      card.style.setProperty('--c', d.color);
+      card.innerHTML =
+        `<div class="an"><span class="an-e">${d.emoji}</span><span>${d.name}</span></div>` +
+        `<div class="at" id="th-${d.id}">idle</div>` +
+        `<div class="as"><span class="ad" id="dt-${d.id}"></span>` +
+        `<span class="aa" id="ac-${d.id}">idle</span></div>`;
+      card.addEventListener('click', () => {
+        const a = agents[d.id];
+        a.chatMsg = 'on it, John!';
+        a.chatTimer = 2.5;
+        a.tx = a.deskX; a.ty = a.deskY;
+        focusedAgentId = d.id;
+        addFeed(a.name, '📣 pinged by you', a.color);
+        document.querySelectorAll('.ac').forEach(el => el.classList.toggle('focus', el.id === 'card-' + d.id));
+      });
+      list.appendChild(card);
+    });
   });
 }
 
@@ -707,6 +1036,10 @@ function connect() {
         a.action = agent.action || 'idle';
         a.thought = agent.thought || '...';
         a.busy = a.action !== 'idle';
+        // Server state only drives thought text, action icon and the busy
+        // flag. It NEVER overrides tx/ty — the client-side wander loop is
+        // the sole authority on where agents walk. Otherwise incoming think
+        // ticks would yank them back to their desks every few seconds.
         updateCard(agentId);
       });
     });
@@ -726,37 +1059,20 @@ function connect() {
 
 // ── Main loop ─────────────────────────────────────────────────────────────────
 let pcTick = 0, tick = 0;
+const DEBUG = new URLSearchParams(window.location.search).get('debug') === '1';
+let dbgFps = 0, dbgFrames = 0, dbgAcc = 0;
 
-// ── Autonomous movement: agents wander and visit each other ──────────────────
-// Each agent independently picks a new destination every few seconds.
-// Sometimes they visit another agent's desk (talk interaction).
-const moveTimers = {};
-DEFS.forEach(d => {
-  moveTimers[d.id] = {
-    nextMoveAt: Date.now() + Math.random() * 4000 + 1000,
-    visiting: null,
-  };
-});
-
-function updateMovement() {
-  const now = Date.now();
-  DEFS.forEach(d => {
-    const a = agents[d.id];
-    const t = moveTimers[d.id];
-    const atTarget = Math.abs(a.wx - a.tx) < 0.5 && Math.abs(a.wy - a.ty) < 0.5;
-    if (!atTarget || now < t.nextMoveAt) return;
-    const behavior = BEHAVIORS[d.id] || bDefault;
-    behavior(a, d, t, now, DEFS);
-    // Clamp target within office bounds
-    a.tx = Math.max(TILE * 2, Math.min((COLS - 2) * TILE, a.tx));
-    a.ty = Math.max(TILE * 2, Math.min((ROWS - 2) * TILE, a.ty));
-  });
-}
-
+const BOOT_TS = Date.now();
+const BUILD = 'v7-always-wander';
 function render(ts) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  if (!assetsReady()) {
+  // Only show the loading screen for up to 3 seconds. After that, force the
+  // render loop to run even if an image failed to load — fallback circles
+  // and emoji will stand in for any missing sprites, so the office is never
+  // permanently frozen on "LOADING".
+  const bootElapsed = (Date.now() - BOOT_TS) / 1000;
+  if (!assetsReady() && bootElapsed < 3) {
     ctx.fillStyle = '#0d0d1a';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     const pct = Math.floor(loaded / totalAssets * 100);
@@ -773,11 +1089,18 @@ function render(ts) {
   }
 
   pcTick++;
+  const dt = (ts - (render._ts || ts)) / 1000;
+  render._ts = ts;
+  dbgAcc += dt; dbgFrames++;
+  if (dbgAcc >= 0.5) { dbgFps = dbgFrames / dbgAcc; dbgFrames = 0; dbgAcc = 0; }
   drawFloor();
   drawWalls();
   drawFurniture(pcTick);
-  updateMovement();
   drawAgents(ts);
+  // Draw dust particles above furniture, below overlays
+  const pdt = Math.min((ts - (render._lastTs || ts)) / 1000, 0.1);
+  render._lastTs = ts;
+  drawParticles(pdt);
 
   // Vignette
   const vg = ctx.createRadialGradient(
@@ -793,11 +1116,37 @@ function render(ts) {
   ctx.fillStyle = 'rgba(0,0,0,0.03)';
   for (let y = 0; y < canvas.height; y += 3) ctx.fillRect(0, y, canvas.width, 1);
 
+  // Build version badge (bottom-left) — proves the new code reached the browser
+  ctx.fillStyle = 'rgba(0,0,0,0.7)';
+  ctx.fillRect(8, canvas.height - 22, 130, 16);
+  ctx.fillStyle = '#00ff88';
+  ctx.font = 'bold 10px "Courier New"';
+  ctx.textAlign = 'left';
+  ctx.fillText('BUILD ' + BUILD, 14, canvas.height - 10);
+
   tick++;
   if (tick % 60 === 0) {
     const active = DEFS.filter(d => agents[d.id].busy).length;
     document.getElementById('active').textContent = active;
     document.getElementById('tk').textContent = '⏱ ' + tick;
+  }
+
+  // Debug overlay — enable with ?debug=1 in the URL
+  if (DEBUG) {
+    const a0 = agents[DEFS[0].id];
+    const moving = Math.hypot(a0.tx - a0.wx, a0.ty - a0.wy) > 0.5;
+    ctx.fillStyle = 'rgba(0,0,0,.75)';
+    ctx.fillRect(8, 8, 320, 70);
+    ctx.fillStyle = '#00ff88';
+    ctx.font = 'bold 11px "Courier New"';
+    ctx.textAlign = 'left';
+    ctx.fillText('DEBUG  tick=' + tick + '  fps=' + (dbgFps|0), 14, 24);
+    ctx.fillText(DEFS[0].id + '  wx=' + a0.wx.toFixed(1) + ' tx=' + a0.tx.toFixed(1) +
+      '  mv=' + (moving?'Y':'N'), 14, 40);
+    ctx.fillText('wTimer=' + a0.wanderTimer.toFixed(2) + '  busy=' + a0.busy +
+      '  purpose=' + (a0.purpose||'-'), 14, 56);
+    ctx.fillText('assets=' + loaded + '/' + totalAssets +
+      '  room=' + (room ? 'on' : 'off'), 14, 72);
   }
 
   requestAnimationFrame(render);
@@ -806,7 +1155,8 @@ function render(ts) {
 // ── Boot ──────────────────────────────────────────────────────────────────────
 buildSidebar();
 requestAnimationFrame(render);
-connect(); // will retry itself if Colyseus not yet loaded
 </script>
+<script src="https://cdn.jsdelivr.net/npm/colyseus.js@0.15.19/dist/colyseus.js"
+  onload="connect()" onerror="setTimeout(connect,1000)"></script>
 </body>
 </html>

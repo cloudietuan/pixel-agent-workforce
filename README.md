@@ -11,10 +11,22 @@
 | Layer | Tech |
 |-------|------|
 | Agent server | Colyseus (WebSocket), Node 18, TypeScript |
-| Local inference | Ollama + llama3.2 |
+| Inference | Claude (Anthropic Messages API) *or* Ollama + llama3.2 |
 | Pixel UI | Vanilla Canvas + pixel-agents sprites |
 | Memory | SQLite (persistent across sessions) |
 | Context sync | File watcher on `/context/` folder |
+
+### Inference backend
+
+Set `ANTHROPIC_API_KEY` in `server/.env` to have all 12 agents think using
+Claude. Without the key, the server falls back to a local Ollama instance at
+`http://127.0.0.1:11434`.
+
+```bash
+# server/.env
+ANTHROPIC_API_KEY=sk-ant-...
+ANTHROPIC_MODEL=claude-haiku-4-5-20251001   # optional override
+```
 
 ---
 
@@ -37,6 +49,19 @@ npx vite --port 5174
 ```
 
 Open **http://localhost:5174/office.html**
+
+### Access from other devices on your network
+
+Start Vite bound to all interfaces:
+
+```bash
+cd pixel-ui && npx vite --host 0.0.0.0 --port 5174
+```
+
+Then on any phone / laptop on the same Wi-Fi, open
+`http://<your-mac-ip>:5174/office.html` (the WebSocket auto-detects the host).
+
+To target a different server, append `?ws=ws://host:port` to the URL.
 
 ---
 

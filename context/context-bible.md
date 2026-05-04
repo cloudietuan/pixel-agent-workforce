@@ -1,6 +1,16 @@
 # JOHNS COMMAND CENTER — SESSION CONTEXT UPDATE
-# Last updated: April 16, 2026
+# Last updated: April 16, 2026 (UI rewrite — evening session)
 # This file is auto-loaded by ContextSync on every server start.
+
+## UI REWRITE — COMPLETED THIS SESSION
+- office.html layout fully fixed — 4×3 grid (12 agents), no desk/wall overlap
+- Characters now animate with purpose: walk, visit buddies, take breaks, return to desk
+- Pokémon-style zone rugs per team (Strategy / Business / Wellness)
+- Chat bubbles show when agents meet (speaks buddy's name in feed)
+- Sidebar now groups agents by team with color-coded headers
+- Buddy relationships encoded from inter-agent rules (Atlas orchestrates, Mental checks on, Exercise↔Nutrition, Biz↔Finance, etc.)
+- Branch: claude/update-pixel-agent-ui-qHlY5
+
 
 ## WHO JOHN IS
 - Senior at Gilbert Classical Academy (GCA), Gilbert, Arizona — graduating 2026
