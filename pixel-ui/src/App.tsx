@@ -21,7 +21,6 @@ import { EditorToolbar } from './office/editor/EditorToolbar.js';
 import { OfficeState } from './office/engine/officeState.js';
 import { isRotatable } from './office/layout/furnitureCatalog.js';
 import { EditTool } from './office/types.js';
-import { isBrowserRuntime } from './runtime.js';
 import { vscode } from './vscodeApi.js';
 
 // Game state lives outside React — updated imperatively by message handlers
@@ -44,8 +43,7 @@ function App() {
       await initBrowserMock();
       dispatchMockMessages();
       // After assets + layout loaded, spawn our agents
-      const spawn = (window as any).__bridge_spawnAgents;
-      if (spawn) spawn();
+      window.__bridge_spawnAgents?.();
     });
   }, []);
 

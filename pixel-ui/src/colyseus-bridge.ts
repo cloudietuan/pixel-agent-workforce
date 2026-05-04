@@ -4,6 +4,25 @@
 
 import * as Colyseus from 'colyseus.js';
 
+declare global {
+  interface Window {
+    __bridge_spawnAgents?: () => void;
+    __colyseus_postMessage?: (msg: unknown) => void;
+  }
+}
+
+interface AgentSchemaShape {
+  action: string;
+  thought: string;
+  onChange: (cb: () => void) => void;
+}
+
+interface OfficeStateShape {
+  agents: {
+    onAdd: (cb: (agent: AgentSchemaShape, agentId: string) => void) => void;
+  };
+}
+
 const WS_URL = 'ws://localhost:3000';
 
 const AGENT_MAP: Record<string, { id: number; palette: number; hueShift: number; label: string }> = {
@@ -62,7 +81,8 @@ function connect() {
     console.log('[Bridge] Connected to Johns Command Center ✓');
 
     // Listen for state changes and update tool animations
-    r.state.agents.onAdd((agent: any, agentId: string) => {
+    const state = r.state as OfficeStateShape;
+    state.agents.onAdd((agent, agentId) => {
       const info = AGENT_MAP[agentId];
       if (!info) return;
 
@@ -109,7 +129,7 @@ function connect() {
 export function setupBridge() {
   // Register spawn function — called when vscodeApi receives 'webviewReady'
   // This fires AFTER React mounts and adds the message listener (safe timing)
-  (window as any).__bridge_spawnAgents = () => {
+  window.__bridge_spawnAgents = () => {
     spawnAgents();
     console.log('[Bridge] webviewReady received — spawning 12 agents');
   };
@@ -118,7 +138,7 @@ export function setupBridge() {
   connect();
 
   // Allow UI to send messages back to server
-  (window as any).__colyseus_postMessage = (msg: unknown) => {
+  window.__colyseus_postMessage = (msg: unknown) => {
     if (!room) return;
     const m = msg as Record<string, unknown>;
     if (m.type === 'chat') room.send('chat', { text: m.text });
